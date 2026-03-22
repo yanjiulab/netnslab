@@ -1,0 +1,27 @@
+name: bridge-lab
+
+routing:
+  auto_static: false
+
+addressing:
+  p2p: 10.50.0.0/16
+  lan: 10.60.0.0/16
+  loopback: 10.0.3.0/24
+
+mgmt:
+  enable: true
+  ipv4: 192.168.103.0/24
+
+topology:
+  nodes:
+    h1: { kind: host }
+    h2: { kind: host }
+    h3: { kind: host }
+    br1: { kind: bridge }
+
+  links:
+    # 单一 bridge 下的多 host，纯二层广播域，全部自动分配同一个 /24 网段
+    - endpoints: ["h1:eth1", "br1:eth1"]
+    - endpoints: ["h2:eth1", "br1:eth2"]
+    - endpoints: ["h3:eth1", "br1:eth3"]
+

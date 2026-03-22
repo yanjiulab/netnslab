@@ -1,0 +1,31 @@
+name: ring3-lab
+
+routing:
+  auto_static: true
+
+addressing:
+  p2p: 10.30.0.0/16
+  lan: 10.40.0.0/16
+  loopback: 10.0.2.0/24
+
+mgmt:
+  enable: false
+  ipv4: 192.168.102.0/24
+
+topology:
+  nodes:
+    r1: { kind: router }
+    r2: { kind: router }
+    r3: { kind: router }
+
+  links:
+    # 全部手动指定 /30 点对点
+    - endpoints: ["r1:eth1", "r2:eth1"]
+      ipv4: ["10.30.0.1/30", "10.30.0.2/30"]
+
+    - endpoints: ["r2:eth2", "r3:eth1"]
+      ipv4: ["10.30.0.5/30", "10.30.0.6/30"]
+
+    - endpoints: ["r3:eth2", "r1:eth2"]
+      ipv4: ["10.30.0.9/30", "10.30.0.10/30"]
+

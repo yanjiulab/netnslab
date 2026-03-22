@@ -1,0 +1,34 @@
+name: simple-lab
+
+routing:
+  auto_static: false
+
+addressing:
+  p2p: 10.10.0.0/16
+  lan: 10.20.0.0/16
+  loopback: 10.0.1.0/24
+
+mgmt:
+  enable: true
+  ipv4: 192.168.101.0/24
+
+topology:
+  nodes:
+    h1:
+      kind: host
+    h2:
+      kind: host
+    r1:
+      kind: router
+
+  links:
+    # h1 - r1, 自动分配 /24 LAN 网段；可选 tc netem（两端出口各挂一份）
+    - endpoints: ["h1:eth1", "r1:eth1"]
+      netem:
+        delay_ms: 20
+        jitter_ms: 5
+        loss_percent: 0.1
+
+    # h2 - r1, 自动分配 /24 LAN 网段
+    - endpoints: ["h2:eth1", "r1:eth2"]
+

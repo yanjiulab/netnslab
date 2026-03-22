@@ -1,0 +1,54 @@
+name: demo-lab
+
+routing:
+  auto_static: true
+
+addressing:
+  p2p: 10.1.0.0/16
+  lan: 10.2.0.0/16
+  loopback: 10.255.0.0/24
+
+mgmt:
+  enable: true
+  ipv4: 192.168.100.0/24
+
+topology:
+  nodes:
+    h1:
+      kind: host
+      exec: |
+        ping -c 3 1.1.1.1 > /var/log/h1-ping.log 2>&1 &
+      sysctl:
+        net.core.somaxconn: "65535"
+      env:
+        DEBUG: "1"
+
+    h2:
+      kind: host
+
+    r1:
+      kind: router
+
+    r2:
+      kind: router
+
+    br1:
+      kind: bridge
+
+    br2:
+      kind: bridge
+
+  links:
+    - endpoints: ["r1:eth1", "r2:eth1"]
+      # ipv4: ["10.1.1.1/30", "10.1.1.2/30"]
+      netem:
+        delay_ms: 20
+        jitter_ms: 5
+        loss_percent: 0.1
+
+    - endpoints: ["r1:eth2", "br1:eth1"]
+    - endpoints: ["h1:eth1", "br1:eth2"]
+
+    - endpoints: ["r2:eth2", "br2:eth1"]
+    - endpoints: ["h2:eth1", "br2:eth2"]
+
