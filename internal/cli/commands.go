@@ -6,13 +6,13 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/yourname/netnslab/internal/config"
-	"github.com/yourname/netnslab/internal/labstate"
-	"github.com/yourname/netnslab/internal/logx"
-	"github.com/yourname/netnslab/internal/mgmt"
-	"github.com/yourname/netnslab/internal/netns"
-	"github.com/yourname/netnslab/internal/routing"
-	"github.com/yourname/netnslab/internal/topology"
+	"github.com/yanjiulab/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/labstate"
+	"github.com/yanjiulab/netnslab/internal/logx"
+	"github.com/yanjiulab/netnslab/internal/mgmt"
+	"github.com/yanjiulab/netnslab/internal/netns"
+	"github.com/yanjiulab/netnslab/internal/routing"
+	"github.com/yanjiulab/netnslab/internal/topology"
 )
 
 func NewDeployCommand() *cobra.Command {
@@ -199,4 +199,3 @@ func NewDestroyCommand() *cobra.Command {
 
 	return cmd
 }
-

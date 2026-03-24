@@ -1,22 +1,41 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/yourname/netnslab/internal/cli"
+	"github.com/yanjiulab/netnslab/internal/cli"
 )
 
 // version is the release version (override at build time with -ldflags "-X main.version=...").
-var version = "0.1.0"
+var (
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
+	BuiltBy = "unknown"
+)
+
+// String returns a human-friendly version string.
+func VersionString() string {
+	return fmt.Sprintf(
+		"%s (commit=%s, date=%s, builtBy=%s, go=%s)",
+		Version,
+		Commit,
+		Date,
+		BuiltBy,
+		runtime.Version(),
+	)
+}
 
 func newRootCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "netnslab",
 		Short:   "netnslab is a lightweight Linux netns based network lab tool",
-		Version: version,
+		Version: VersionString(),
 	}
 
 	cmd.PersistentFlags().Bool("debug", false, "enable debug logging")
@@ -42,4 +61,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

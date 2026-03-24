@@ -3,15 +3,15 @@ package routing
 import (
 	"net"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 // Graph holds router adjacency information and subnet ownership.
 type Graph struct {
 	Routers      map[string]*config.Node
-	Adjacency    map[string][]string      // router -> neighboring routers
-	SubnetOwners map[string][]string      // subnet CIDR -> routers that have it directly connected
-	Subnets      map[string]*net.IPNet    // subnet CIDR -> parsed net
+	Adjacency    map[string][]string          // router -> neighboring routers
+	SubnetOwners map[string][]string          // subnet CIDR -> routers that have it directly connected
+	Subnets      map[string]*net.IPNet        // subnet CIDR -> parsed net
 	RouterIfaces map[string]map[string]string // router -> subnet -> interface name
 }
 
@@ -81,4 +81,3 @@ func appendIfMissing(slice []string, v string) []string {
 	}
 	return append(slice, v)
 }
-

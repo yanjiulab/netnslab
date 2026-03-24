@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 func TestAssignInterfacesAndAllocateAddresses(t *testing.T) {
@@ -54,9 +54,9 @@ func TestBridgePortHasNoIP(t *testing.T) {
 		},
 		Topology: config.Topology{
 			Nodes: map[string]*config.Node{
-				"h1":   {Kind: "host"},
-				"br1":  {Kind: "bridge"},
-				"r1":   {Kind: "router"},
+				"h1":  {Kind: "host"},
+				"br1": {Kind: "bridge"},
+				"r1":  {Kind: "router"},
 			},
 			Links: []*config.Link{
 				{Endpoints: []string{"h1:eth1", "br1:eth1"}},
@@ -210,4 +210,3 @@ func subnetRange(sn *net.IPNet) (start, end uint32) {
 func rangesOverlap(a, b [2]uint32) bool {
 	return a[0] < b[1] && b[0] < a[1]
 }
-

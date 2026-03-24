@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 // HostDefaultGateways returns default gateway IPv4 addresses (no /mask) for each host.

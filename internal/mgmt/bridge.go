@@ -6,8 +6,8 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/yourname/netnslab/internal/config"
-	"github.com/yourname/netnslab/internal/netns"
+	"github.com/yanjiulab/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/netns"
 )
 
 // SetupMgmtBridge creates the host-side management bridge and connects
@@ -107,4 +107,3 @@ func mgmtBridgeName(labName string) string {
 	}
 	return "nmg-" + hex
 }
-

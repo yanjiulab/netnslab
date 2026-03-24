@@ -3,7 +3,7 @@ package topology
 import (
 	"fmt"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 // BuiltTopology is an in-memory representation of the lab topology,
@@ -34,4 +34,3 @@ func Build(cfg *config.Config) (*BuiltTopology, error) {
 
 	return &BuiltTopology{Config: cfg}, nil
 }
-

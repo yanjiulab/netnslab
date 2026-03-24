@@ -6,7 +6,7 @@ import (
 	"net"
 	"sort"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 // assignInterfaces ensures every link endpoint has an interface name and
@@ -77,10 +77,10 @@ func (r ifaceRef) key() string {
 }
 
 // AllocateAddresses assigns IPv4 only where needed.
-// - If a link has ipv4: [a, b] (two entries), no automatic allocation is done for that link;
-//   values apply only to non-bridge endpoints (bridge ports stay L2-only).
-// - Otherwise, a global plan runs: bridge LAN segments first, then direct host-host / router-router (P2P),
-//   then direct host-router (LAN, router first usable, host next).
+//   - If a link has ipv4: [a, b] (two entries), no automatic allocation is done for that link;
+//     values apply only to non-bridge endpoints (bridge ports stay L2-only).
+//   - Otherwise, a global plan runs: bridge LAN segments first, then direct host-host / router-router (P2P),
+//     then direct host-router (LAN, router first usable, host next).
 func AllocateAddresses(cfg *config.Config) error {
 	p2pAlloc, err := newSubnetAllocator(cfg.Addressing.P2P, 30)
 	if err != nil {

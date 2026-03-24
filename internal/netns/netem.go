@@ -3,7 +3,7 @@ package netns
 import (
 	"fmt"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 // netemArgs builds tc netem parameters (delay/jitter/loss only).

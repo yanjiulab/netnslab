@@ -3,8 +3,8 @@ package routing
 import (
 	"fmt"
 
-	"github.com/yourname/netnslab/internal/config"
-	"github.com/yourname/netnslab/internal/netns"
+	"github.com/yanjiulab/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/netns"
 )
 
 // ApplyRoutes installs the computed static routes into router namespaces.
@@ -19,4 +19,3 @@ func ApplyRoutes(cfg *config.Config, routes map[string][]Route) error {
 	}
 	return nil
 }
-

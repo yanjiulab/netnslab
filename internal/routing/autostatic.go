@@ -3,7 +3,7 @@ package routing
 import (
 	"fmt"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 // Route represents a static route to be installed on a router.
@@ -146,4 +146,3 @@ func findNextHopIP(cfg *config.Config, srcRouter, nextRouter string) (string, st
 	}
 	return "", "", fmt.Errorf("no direct link between %s and %s", srcRouter, nextRouter)
 }
-

@@ -3,7 +3,7 @@ package topology
 import (
 	"testing"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 func TestHostDefaultGatewaysBridge(t *testing.T) {

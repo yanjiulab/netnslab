@@ -3,7 +3,7 @@ package topology
 import (
 	"sort"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 // BridgePortIfaces returns sorted data-plane interface names on a bridge node

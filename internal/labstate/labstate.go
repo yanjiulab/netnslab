@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 // Persisted models a deployed lab for runtime introspection (show, etc.).
@@ -24,7 +24,7 @@ type Persisted struct {
 
 // PersistedLink is one edge with resolved endpoint names "node:ifname".
 type PersistedLink struct {
-	Endpoints [2]string       `json:"endpoints"`
+	Endpoints [2]string         `json:"endpoints"`
 	Netem     *config.LinkNetem `json:"netem,omitempty"`
 }
 

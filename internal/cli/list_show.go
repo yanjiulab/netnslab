@@ -9,10 +9,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/yourname/netnslab/internal/config"
-	"github.com/yourname/netnslab/internal/labstate"
-	"github.com/yourname/netnslab/internal/logx"
-	"github.com/yourname/netnslab/internal/netns"
+	"github.com/yanjiulab/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/labstate"
+	"github.com/yanjiulab/netnslab/internal/logx"
+	"github.com/yanjiulab/netnslab/internal/netns"
 )
 
 func NewListCommand() *cobra.Command {

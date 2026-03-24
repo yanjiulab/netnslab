@@ -1,4 +1,4 @@
-module github.com/yourname/netnslab
+module github.com/yanjiulab/netnslab
 
 go 1.23.5
 

@@ -1,13 +1,13 @@
 package netns
 
 import (
-	"hash/fnv"
 	"fmt"
+	"hash/fnv"
 	"os/exec"
 	"strconv"
 	"strings"
 
-	"github.com/yourname/netnslab/internal/config"
+	"github.com/yanjiulab/netnslab/internal/config"
 )
 
 // EnsureLoopbackUp brings the loopback interface up in the node namespace.
@@ -152,6 +152,3 @@ func BridgeHasPorts(name string) bool {
 	}
 	return strings.TrimSpace(string(out)) != ""
 }
-
-
-

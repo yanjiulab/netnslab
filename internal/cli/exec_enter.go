@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/yourname/netnslab/internal/logx"
-	"github.com/yourname/netnslab/internal/netns"
+	"github.com/yanjiulab/netnslab/internal/logx"
+	"github.com/yanjiulab/netnslab/internal/netns"
 )
 
 func NewExecCommand() *cobra.Command {
