@@ -2,7 +2,9 @@ package mgmt
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net"
+	"strconv"
 
 	"github.com/yourname/netnslab/internal/config"
 	"github.com/yourname/netnslab/internal/netns"
@@ -20,7 +22,7 @@ func SetupMgmtBridge(cfg *config.Config) error {
 		return fmt.Errorf("invalid mgmt.ipv4: %w", err)
 	}
 
-	bridgeName := "netnslab-mgmt"
+	bridgeName := mgmtBridgeName(cfg.Name)
 
 	// Create bridge and assign gateway IP (.1 in the subnet).
 	if err := netns.CreateBridge(bridgeName); err != nil {
@@ -51,15 +53,17 @@ func TeardownMgmtBridge(cfg *config.Config) error {
 		return nil
 	}
 
-	bridgeName := "netnslab-mgmt"
+	bridgeName := mgmtBridgeName(cfg.Name)
 
 	// Delete host-side management veth interfaces.
 	for nodeName := range cfg.Topology.Nodes {
-		hostIf := fmt.Sprintf("m-%s-%s", nodeName, "eth0")
+		hostIf := netns.MgmtHostInterfaceName(cfg.Name, nodeName, "eth0")
 		_ = netns.DeleteLink(hostIf)
+		// Backward-compatible cleanup for links created by older versions.
+		_ = netns.DeleteLink(fmt.Sprintf("m-%s-%s", nodeName, "eth0"))
 	}
 
-	// Delete the management bridge itself.
+	// Per-lab bridge can be deleted directly.
 	if err := netns.DeleteLink(bridgeName); err != nil {
 		return err
 	}
@@ -90,5 +94,17 @@ func hostIPs(n *net.IPNet, count int) []string {
 func maskSize(n *net.IPNet) int {
 	ones, _ := n.Mask.Size()
 	return ones
+}
+
+func mgmtBridgeName(labName string) string {
+	// Linux interface names are limited to 15 chars.
+	// "nmg-" is 4 chars, so we can use up to 11 hash chars.
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(labName))
+	hex := strconv.FormatUint(uint64(h.Sum32()), 16)
+	if len(hex) > 8 {
+		hex = hex[:8]
+	}
+	return "nmg-" + hex
 }
 

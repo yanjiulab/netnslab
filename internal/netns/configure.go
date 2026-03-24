@@ -1,7 +1,10 @@
 package netns
 
 import (
+	"hash/fnv"
 	"fmt"
+	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/yourname/netnslab/internal/config"
@@ -91,17 +94,25 @@ func AddDefaultRoute(labName, nodeName, gateway string) error {
 
 // AssignBridgeIP assigns an IP address to a bridge on the host.
 func AssignBridgeIP(bridge, cidr string) error {
-	if err := runIP("addr", "add", cidr, "dev", bridge); err != nil {
+	if err := runIP("addr", "replace", cidr, "dev", bridge); err != nil {
 		return err
 	}
 	return nil
+}
+
+// MgmtHostInterfaceName returns a deterministic host-side veth name for node mgmt link.
+// Linux link names are limited to 15 chars, so we keep a short hash suffix to avoid cross-lab collisions.
+func MgmtHostInterfaceName(labName, nodeName, ifName string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(labName + "|" + nodeName + "|" + ifName))
+	return "m" + strconv.FormatUint(uint64(h.Sum32()), 16)
 }
 
 // CreateMgmtInterface creates a veth pair and connects a node eth0 to the host bridge.
 func CreateMgmtInterface(labName, nodeName, bridgeName, ifName, cidr string) error {
 	nsName := NamespaceName(labName, nodeName)
 
-	hostIf := fmt.Sprintf("m-%s-%s", nodeName, ifName)
+	hostIf := MgmtHostInterfaceName(labName, nodeName, ifName)
 	if err := runIP("link", "add", hostIf, "type", "veth", "peer", "name", ifName); err != nil {
 		return err
 	}
@@ -124,6 +135,22 @@ func CreateMgmtInterface(labName, nodeName, bridgeName, ifName, cidr string) err
 	}
 
 	return nil
+}
+
+// LinkExists reports whether a link exists in host namespace.
+func LinkExists(name string) bool {
+	cmd := exec.Command("ip", "link", "show", name)
+	return cmd.Run() == nil
+}
+
+// BridgeHasPorts reports whether a bridge currently has any slave ports.
+func BridgeHasPorts(name string) bool {
+	cmd := exec.Command("ip", "-o", "link", "show", "master", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != ""
 }
 
 
