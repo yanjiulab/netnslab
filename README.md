@@ -103,7 +103,7 @@ Default layout (see `internal/netns/paths.go`):
 ## CLI reference (short)
 
 | Command | Description |
-|--------|-------------|
+| ------- | ----------- |
 | `deploy -f FILE` | Build lab from YAML |
 | `validate -f FILE` | Validate YAML topology without deploying |
 | `destroy LAB` | Tear down deployed lab by lab name |
@@ -111,12 +111,14 @@ Default layout (see `internal/netns/paths.go`):
 | `show LAB` | Live summary (IPs + link **netem** summary) |
 | `graph LAB` | Graphviz DOT with live interface IPs |
 | `enter LAB NODE` | Interactive shell in node netns |
-| `exec LAB NODE -- CMD...` | Run command in node netns |
+| `exec LAB NODE -- CMD...` | Run command in one node netns |
+| `exec LAB --all -- CMD...` | Run command on all nodes in lab |
+| `exec LAB --kind router -- CMD...` | Run command on nodes filtered by kind |
 | `capture LAB NODE IFACE` | `tcpdump` in netns (pcap under run dir) |
 
 ## Project layout
 
-```
+```text
 cmd/netnslab/          # CLI entry
 internal/cli/          # Cobra commands
 internal/config/       # YAML types and validation
