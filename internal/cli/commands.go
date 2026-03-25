@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -127,6 +128,24 @@ func NewDeployCommand() *cobra.Command {
 				}
 				if err := netns.ApplyNetem(labName, n1, i1, link.Netem); err != nil {
 					return fmt.Errorf("topology.links[%d] netem on %s:%s: %w", li, n1, i1, err)
+				}
+			}
+
+			nodeNames := make([]string, 0, len(cfg.Topology.Nodes))
+			for n := range cfg.Topology.Nodes {
+				nodeNames = append(nodeNames, n)
+			}
+			sort.Strings(nodeNames)
+			for _, nodeName := range nodeNames {
+				n := cfg.Topology.Nodes[nodeName]
+				if err := netns.WriteNodeEnvFile(labName, nodeName, n.Env); err != nil {
+					return fmt.Errorf("node %q env: %w", nodeName, err)
+				}
+			}
+			for _, nodeName := range nodeNames {
+				n := cfg.Topology.Nodes[nodeName]
+				if err := netns.RunStartupExec(labName, nodeName, n.Exec, n.Env); err != nil {
+					return err
 				}
 			}
 

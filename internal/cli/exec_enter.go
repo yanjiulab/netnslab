@@ -45,6 +45,11 @@ func NewExecCommand() *cobra.Command {
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
+			nodeEnv, err := netns.ReadNodeEnvFile(labName, nodeName)
+			if err != nil {
+				return fmt.Errorf("read node env: %w", err)
+			}
+			c.Env = netns.MergeEnviron(os.Environ(), nodeEnv)
 
 			return c.Run()
 		},
@@ -74,7 +79,11 @@ func NewEnterCommand() *cobra.Command {
 			}
 
 			prompt := fmt.Sprintf("netnslab-%s:/# ", nodeName)
-			env := os.Environ()
+			nodeEnv, err := netns.ReadNodeEnvFile(labName, nodeName)
+			if err != nil {
+				return fmt.Errorf("read node env: %w", err)
+			}
+			env := netns.MergeEnviron(os.Environ(), nodeEnv)
 			env = append(env, "PS1="+prompt)
 
 			ipArgs := []string{"netns", "exec", nsName, shell}
