@@ -105,6 +105,7 @@ Default layout (see `internal/netns/paths.go`):
 | Command | Description |
 |--------|-------------|
 | `deploy -f FILE` | Build lab from YAML |
+| `validate -f FILE` | Validate YAML topology without deploying |
 | `destroy LAB` | Tear down deployed lab by lab name |
 | `list` | List deployed labs |
 | `show LAB` | Live summary (IPs + link **netem** summary) |

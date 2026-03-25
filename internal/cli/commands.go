@@ -49,6 +49,40 @@ func NewDeployCommand() *cobra.Command {
 				return fmt.Errorf("deploy/precheck: stat lab run dir: %w", err)
 			}
 
+			// Best-effort rollback: if deploy fails after partially creating resources,
+			// try to clear tc netem, mgmt, netns namespaces, and remove runtime dirs.
+			success := false
+			nodeNamesForCleanup := make([]string, 0, len(cfg.Topology.Nodes))
+			for n := range cfg.Topology.Nodes {
+				nodeNamesForCleanup = append(nodeNamesForCleanup, n)
+			}
+			defer func() {
+				if success {
+					return
+				}
+
+				logx.S().Debugw("deploy rollback (best-effort)", "lab", labName)
+
+				for _, link := range cfg.Topology.Links {
+					if link.Netem == nil || !link.Netem.NetemActive() {
+						continue
+					}
+					n0, i0 := config.SplitEndpointPublic(link.Endpoints[0])
+					n1, i1 := config.SplitEndpointPublic(link.Endpoints[1])
+					netns.ClearNetem(labName, n0, i0)
+					netns.ClearNetem(labName, n1, i1)
+				}
+
+				// TeardownMgmtBridge is best-effort (we ignore its error).
+				_ = mgmt.TeardownMgmtBridge(cfg)
+
+				for _, nodeName := range nodeNamesForCleanup {
+					_ = netns.DeleteNamespace(labName, nodeName)
+				}
+
+				_ = netns.RemoveLabDirs(labName)
+			}()
+
 			if _, err := topology.Build(cfg); err != nil {
 				return fmt.Errorf("deploy/build topology: %w", err)
 			}
@@ -172,6 +206,7 @@ func NewDeployCommand() *cobra.Command {
 				return fmt.Errorf("write lab state: %w", err)
 			}
 
+			success = true
 			return nil
 		},
 	}
