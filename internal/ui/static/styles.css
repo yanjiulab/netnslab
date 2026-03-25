@@ -137,6 +137,12 @@ body {
   line-height: 1.4;
 }
 
+.section-title {
+  margin: 12px 0 6px 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
 .detail pre {
   margin: 8px 0 0 0;
   white-space: pre-wrap;

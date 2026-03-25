@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>netnslab 拓扑可视化</title>
+    <title>netnslab topology UI</title>
     <link rel="stylesheet" href="/ui/styles.css" />
   </head>
   <body>
@@ -15,10 +15,25 @@
           Lab:
           <select id="labSelect"></select>
         </label>
-        <button id="refreshBtn" class="btn">刷新</button>
+        <button id="refreshBtn" class="btn">Refresh</button>
+        <label class="control">
+          Layout:
+          <select id="layoutSelect">
+            <option value="cose">cose</option>
+            <option value="circle">circle</option>
+            <option value="grid">grid</option>
+            <option value="concentric">concentric</option>
+            <option value="breadthfirst">breadthfirst</option>
+          </select>
+        </label>
+        <button id="relayoutBtn" class="btn">Relayout</button>
         <label class="control">
           <input id="autoRefresh" type="checkbox" checked />
-          自动刷新
+          Auto refresh
+        </label>
+        <label class="control">
+          <input id="liveToggle" type="checkbox" checked />
+          Live routes + TC
         </label>
       </div>
 
@@ -29,24 +44,25 @@
 
     <main class="layout">
       <aside class="panel" id="nodesPanel">
-        <h3>节点</h3>
+        <h3>Nodes</h3>
         <div id="nodesList" class="nodes"></div>
       </aside>
 
       <section class="panel graph-panel">
         <div class="graph-title">
-          拓扑图
-          <span id="graphHint" class="hint">（MVP 圆形布局）</span>
+          Topology
+          <span id="graphHint" class="hint">(Cytoscape layout)</span>
         </div>
-        <svg id="topologySvg" class="topology"></svg>
+        <div id="topologyGraph" class="topology"></div>
       </section>
 
       <aside class="panel" id="detailPanel">
-        <h3>详情</h3>
-        <div id="detailBody" class="detail">选择节点查看详情</div>
+        <h3>Details</h3>
+        <div id="detailBody" class="detail">Select a node</div>
       </aside>
     </main>
 
+    <script src="/ui/vendor/cytoscape.min.js"></script>
     <script src="/ui/app.js"></script>
   </body>
 </html>

@@ -28,17 +28,24 @@ type uiNode struct {
 	MgmtIP  string    `json:"mgmt_ip"`
 	Ifaces  []uiIface `json:"ifaces,omitempty"`
 	HasMgmt bool      `json:"has_mgmt"`
+	Routes  []string  `json:"routes,omitempty"`
 }
 
 type uiIface struct {
-	IfName string `json:"ifname"`
-	IPv4   string `json:"ipv4"`
+	IfName    string `json:"ifname"`
+	IPv4      string `json:"ipv4"`
+	Up        bool   `json:"up"`
+	OperState string `json:"operstate,omitempty"`
+	TcQdisc   string `json:"tc,omitempty"`
 }
 
 type uiLinkEnd struct {
-	Node   string `json:"node"`
-	IfName string `json:"ifname"`
-	IPv4   string `json:"ipv4"`
+	Node      string `json:"node"`
+	IfName    string `json:"ifname"`
+	IPv4      string `json:"ipv4"`
+	Up        bool   `json:"up"`
+	OperState string `json:"operstate,omitempty"`
+	TcQdisc   string `json:"tc,omitempty"`
 }
 
 type uiLink struct {
@@ -115,7 +122,9 @@ func Serve(addr, labFilter string) error {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		topo, err := buildTopology(labName)
+		live := isTruthy(r.URL.Query().Get("live"))
+		selectedNode := strings.TrimSpace(r.URL.Query().Get("node"))
+		topo, err := buildTopology(labName, live, selectedNode)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, fmt.Sprintf("lab %q not deployed", labName), http.StatusNotFound)
@@ -169,11 +178,13 @@ func filterLabs(in []labsIndex, want string) []labsIndex {
 	return out
 }
 
-func buildTopology(labName string) (*uiTopology, error) {
+func buildTopology(labName string, live bool, selectedNode string) (*uiTopology, error) {
 	st, err := labstate.Load(netns.LabStatePath(labName))
 	if err != nil {
 		return nil, err
 	}
+
+	needSelectedLive := live && selectedNode != ""
 
 	// Collect interface names from link endpoints.
 	ifacesByNode := make(map[string]map[string]struct{})
@@ -188,6 +199,13 @@ func buildTopology(labName string) (*uiTopology, error) {
 		}
 	}
 
+	// mgmt eth0 should be visible even if not referenced by topology.links.
+	if st.Mgmt.Enable {
+		for nodeName := range st.Nodes {
+			ifacesByNode[nodeName] = ensureIfaceSet(ifacesByNode[nodeName], netns.MgmtIfaceName)
+		}
+	}
+
 	nodes := make([]uiNode, 0, len(st.Nodes))
 	nodeNames := make([]string, 0, len(st.Nodes))
 	for n := range st.Nodes {
@@ -195,26 +213,87 @@ func buildTopology(labName string) (*uiTopology, error) {
 	}
 	sort.Strings(nodeNames)
 
+	// Cache interface queries to avoid duplicated ip/netns exec calls.
+	ipByNodeIf := make(map[string]map[string]string)
+	upByNodeIf := make(map[string]map[string]bool)
+	operByNodeIf := make(map[string]map[string]string)
+	tcByNodeIf := make(map[string]map[string]string) // only for selectedNode
+
+	for _, nodeName := range nodeNames {
+		if ipByNodeIf[nodeName] == nil {
+			ipByNodeIf[nodeName] = make(map[string]string)
+		}
+		if live {
+			if upByNodeIf[nodeName] == nil {
+				upByNodeIf[nodeName] = make(map[string]bool)
+			}
+			if operByNodeIf[nodeName] == nil {
+				operByNodeIf[nodeName] = make(map[string]string)
+			}
+		}
+		if needSelectedLive && nodeName == selectedNode {
+			tcByNodeIf[nodeName] = make(map[string]string)
+		}
+
+		for ifName := range ifacesByNode[nodeName] {
+			ipByNodeIf[nodeName][ifName] = netns.QueryIfaceIPv4(labName, nodeName, ifName)
+			if live {
+				up, oper := netns.QueryIfaceUp(labName, nodeName, ifName)
+				upByNodeIf[nodeName][ifName] = up
+				operByNodeIf[nodeName][ifName] = oper
+				if needSelectedLive && nodeName == selectedNode {
+					tcByNodeIf[nodeName][ifName] = netns.QueryTcQdisc(labName, nodeName, ifName)
+				}
+			}
+		}
+	}
+
+	var routesSelected []string
+	if needSelectedLive {
+		routesSelected = netns.QueryRoutes(labName, selectedNode)
+	}
+
 	for _, nodeName := range nodeNames {
 		kind := st.Nodes[nodeName]
 		var ifaces []uiIface
+
 		for ifName := range ifacesByNode[nodeName] {
-			ip := netns.QueryIfaceIPv4(labName, nodeName, ifName)
-			ifaces = append(ifaces, uiIface{IfName: ifName, IPv4: ip})
+			ip := ipByNodeIf[nodeName][ifName]
+			ui := uiIface{
+				IfName: ifName,
+				IPv4:   ip,
+				Up:     false,
+			}
+			if live {
+				ui.Up = upByNodeIf[nodeName][ifName]
+				ui.OperState = operByNodeIf[nodeName][ifName]
+				if needSelectedLive && nodeName == selectedNode {
+					ui.TcQdisc = tcByNodeIf[nodeName][ifName]
+				}
+			}
+			ifaces = append(ifaces, ui)
 		}
-		// mgmt eth0 only if enabled; QueryIfaceIPv4 already returns empty on failure.
-		mgmtIP := ""
-		hasMgmt := st.Mgmt.Enable
-		if hasMgmt {
-			mgmtIP = netns.QueryIfaceIPv4(labName, nodeName, netns.MgmtIfaceName)
-		}
+
 		sort.Slice(ifaces, func(i, j int) bool { return ifaces[i].IfName < ifaces[j].IfName })
+
+		hasMgmt := st.Mgmt.Enable
+		mgmtIP := ""
+		if hasMgmt {
+			mgmtIP = ipByNodeIf[nodeName][netns.MgmtIfaceName]
+		}
+
 		nodes = append(nodes, uiNode{
 			Name:    nodeName,
 			Kind:    kind,
 			MgmtIP:  mgmtIP,
 			Ifaces:  ifaces,
 			HasMgmt: hasMgmt,
+			Routes: func() []string {
+				if needSelectedLive && nodeName == selectedNode {
+					return routesSelected
+				}
+				return nil
+			}(),
 		})
 	}
 
@@ -223,16 +302,45 @@ func buildTopology(labName string) (*uiTopology, error) {
 		aNode, aIf := config.SplitEndpointPublic(l.Endpoints[0])
 		bNode, bIf := config.SplitEndpointPublic(l.Endpoints[1])
 
-		aIP := netns.QueryIfaceIPv4(labName, aNode, aIf)
-		bIP := netns.QueryIfaceIPv4(labName, bNode, bIf)
+		aIP := ipByNodeIf[aNode][aIf]
+		bIP := ipByNodeIf[bNode][bIf]
 
 		netemSummary := "-"
 		if l.Netem != nil && l.Netem.NetemActive() {
 			netemSummary = l.Netem.NetemSummary()
 		}
+		aUp, bUp := false, false
+		aOper, bOper := "", ""
+		aTc, bTc := "", ""
+		if live {
+			aUp = upByNodeIf[aNode][aIf]
+			bUp = upByNodeIf[bNode][bIf]
+			aOper = operByNodeIf[aNode][aIf]
+			bOper = operByNodeIf[bNode][bIf]
+			if needSelectedLive && aNode == selectedNode {
+				aTc = tcByNodeIf[aNode][aIf]
+			}
+			if needSelectedLive && bNode == selectedNode {
+				bTc = tcByNodeIf[bNode][bIf]
+			}
+		}
 		links = append(links, uiLink{
-			A:     uiLinkEnd{Node: aNode, IfName: aIf, IPv4: aIP},
-			B:     uiLinkEnd{Node: bNode, IfName: bIf, IPv4: bIP},
+			A: uiLinkEnd{
+				Node:      aNode,
+				IfName:    aIf,
+				IPv4:      aIP,
+				Up:        aUp,
+				OperState: aOper,
+				TcQdisc:   aTc,
+			},
+			B: uiLinkEnd{
+				Node:      bNode,
+				IfName:    bIf,
+				IPv4:      bIP,
+				Up:        bUp,
+				OperState: bOper,
+				TcQdisc:   bTc,
+			},
 			Netem: netemSummary,
 		})
 	}
@@ -243,6 +351,15 @@ func buildTopology(labName string) (*uiTopology, error) {
 		Nodes:     nodes,
 		Links:     links,
 	}, nil
+}
+
+func isTruthy(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func ensureIfaceSet(set map[string]struct{}, ifName string) map[string]struct{} {

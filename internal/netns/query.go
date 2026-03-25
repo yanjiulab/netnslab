@@ -1,10 +1,12 @@
 package netns
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // MgmtIfaceName is the management interface inside each node netns.
@@ -39,6 +41,78 @@ func QueryIfaceIPv4(labName, nodeName, dev string) string {
 		}
 	}
 	return ""
+}
+
+// QueryIfaceUp returns whether dev is up in the node netns, plus best-effort operstate.
+func QueryIfaceUp(labName, nodeName, dev string) (bool, string) {
+	ns := NamespaceName(labName, nodeName)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", ns, "ip", "-j", "link", "show", "dev", dev)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		var list []struct {
+			IfName    string `json:"ifname"`
+			OperState string `json:"operstate"`
+		}
+		if jerr := json.Unmarshal(out, &list); jerr == nil && len(list) > 0 {
+			state := strings.TrimSpace(list[0].OperState)
+			return strings.EqualFold(state, "UP"), state
+		}
+	}
+
+	// Fallback to human output parsing.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel2()
+	cmd2 := exec.CommandContext(ctx2, "ip", "netns", "exec", ns, "ip", "link", "show", "dev", dev)
+	out2, _ := cmd2.CombinedOutput()
+	text := string(out2)
+	if strings.Contains(text, "state UP") {
+		return true, "UP"
+	}
+	return false, ""
+}
+
+// QueryRoutes returns ip route show output as plain lines (best-effort).
+func QueryRoutes(labName, nodeName string) []string {
+	ns := NamespaceName(labName, nodeName)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", ns, "ip", "route", "show")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// QueryTcQdisc returns tc qdisc show -s output (best-effort, truncated).
+func QueryTcQdisc(labName, nodeName, dev string) string {
+	ns := NamespaceName(labName, nodeName)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", ns, "tc", "-s", "qdisc", "show", "dev", dev, "root")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	text := strings.TrimSpace(string(out))
+	if len(text) > 1200 {
+		return text[:1200] + "...(truncated)"
+	}
+	return text
 }
 
 func fallbackParseIPv4(text string) string {
