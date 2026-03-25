@@ -8,6 +8,14 @@ const state = {
   cy: null,
   cyLayoutHash: "",
   layoutName: "cose",
+  terminal: {
+    ws: null,
+    term: null,
+    fit: null,
+    node: "",
+    open: false,
+    ro: null,
+  },
 };
 
 async function apiGet(url) {
@@ -321,7 +329,8 @@ function highlightSelection() {
 function renderNodes() {
   const list = $("nodesList");
   list.innerHTML = "";
-  const nodes = state.topology?.nodes || [];
+  const nodes =
+    state.topology && state.topology.nodes ? state.topology.nodes : [];
   nodes.forEach((n) => {
     const btn = document.createElement("button");
     btn.className = "node-item";
@@ -345,7 +354,8 @@ function renderNodes() {
 }
 
 function renderDetail() {
-  const nodes = state.topology?.nodes || [];
+  const nodes =
+    state.topology && state.topology.nodes ? state.topology.nodes : [];
   const n = nodes.find((x) => x.name === state.selectedNode) || nodes[0];
   if (!n) {
     $("detailBody").textContent = "No node";
@@ -391,6 +401,172 @@ function renderDetail() {
   `;
 }
 
+function getTerminalSelectedNode() {
+  if (state.selectedNode && String(state.selectedNode).trim()) {
+    return state.selectedNode;
+  }
+  const nodes =
+    state.topology && state.topology.nodes ? state.topology.nodes : [];
+  if (nodes.length) return nodes[0].name;
+  return "";
+}
+
+function terminalPanelEl() {
+  return $("terminalPanel");
+}
+
+function terminalHostEl() {
+  return $("terminalHost");
+}
+
+function setTerminalVisible(visible) {
+  const panel = terminalPanelEl();
+  if (!panel) return;
+  if (visible) panel.classList.remove("hidden");
+  else panel.classList.add("hidden");
+}
+
+function setTerminalFullscreen(fullscreen) {
+  const panel = terminalPanelEl();
+  if (!panel) return;
+  if (fullscreen) panel.classList.add("fullscreen");
+  else panel.classList.remove("fullscreen");
+}
+
+function terminalSendResize() {
+  const t = state.terminal;
+  if (!t.ws || !t.term) return;
+  if (t.ws.readyState !== WebSocket.OPEN) return;
+  t.ws.send(
+    JSON.stringify({ type: "resize", cols: t.term.cols, rows: t.term.rows })
+  );
+}
+
+async function openTerminal() {
+  const nodeName = getTerminalSelectedNode();
+  if (!nodeName) {
+    setStatus("No node selected");
+    return;
+  }
+  if (!state.lab) {
+    setStatus("No lab loaded");
+    return;
+  }
+
+  // If already open for the same node, just show it.
+  if (state.terminal.open && state.terminal.node === nodeName) {
+    setTerminalVisible(true);
+    setTimeout(() => terminalSendResize(), 50);
+    return;
+  }
+
+  // Close previous session if any.
+  if (state.terminal.ws) {
+    try {
+      state.terminal.ws.close();
+    } catch (_) {}
+  }
+  state.terminal.ws = null;
+  state.terminal.term = null;
+  state.terminal.fit = null;
+  state.terminal.node = nodeName;
+
+  const host = terminalHostEl();
+  if (!host) {
+    setStatus("Terminal host not found");
+    return;
+  }
+
+  setTerminalVisible(true);
+  setTerminalFullscreen(false);
+  $("terminalHost").innerHTML = "";
+
+  const term = new Terminal({
+    cursorBlink: true,
+    convertEol: true,
+    scrollback: 2000,
+    fontSize: 13,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(host);
+  fit.fit();
+
+  state.terminal.term = term;
+  state.terminal.fit = fit;
+  state.terminal.open = true;
+
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const wsUrl = `${proto}://${location.host}/ws/labs/${encodeURIComponent(
+    state.lab
+  )}/nodes/${encodeURIComponent(nodeName)}/terminal`;
+  const ws = new WebSocket(wsUrl);
+  state.terminal.ws = ws;
+
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  ws.onopen = () => {
+    terminalSendResize();
+    term.focus();
+  };
+
+  ws.onmessage = async (ev) => {
+    if (!state.terminal.open) return;
+    const data = ev.data;
+    if (typeof data === "string") {
+      term.write(data);
+      return;
+    }
+    if (data instanceof ArrayBuffer) {
+      term.write(decoder.decode(new Uint8Array(data)));
+      return;
+    }
+    if (data instanceof Blob) {
+      const buf = await data.arrayBuffer();
+      term.write(decoder.decode(new Uint8Array(buf)));
+      return;
+    }
+  };
+
+  ws.onerror = () => {
+    setStatus("WebSocket error");
+  };
+
+  ws.onclose = () => {
+    state.terminal.open = false;
+    state.terminal.ws = null;
+    setStatus("Terminal closed");
+  };
+
+  term.onData((d) => {
+    if (!state.terminal.ws || state.terminal.ws.readyState !== WebSocket.OPEN) return;
+    const bytes = encoder.encode(d);
+    state.terminal.ws.send(bytes);
+  });
+
+  // Keep PTY size in sync with container size.
+  if (state.terminal.ro) {
+    try {
+      state.terminal.ro.disconnect();
+    } catch (_) {}
+  }
+  state.terminal.ro = new ResizeObserver(() => {
+    if (!state.terminal.open) return;
+    fit.fit();
+    terminalSendResize();
+  });
+  state.terminal.ro.observe(host);
+}
+
+function toggleTerminalFullscreen() {
+  const panel = terminalPanelEl();
+  if (!panel) return;
+  const full = !panel.classList.contains("fullscreen");
+  setTerminalFullscreen(full);
+  setTimeout(() => terminalSendResize(), 200);
+}
+
 async function loadLabs() {
   const data = await apiGet("/api/labs");
   state.labs = data.labs || [];
@@ -425,7 +601,12 @@ async function loadTopology(forceNodeName) {
   state.selectedNode =
     forceNodeName !== undefined
       ? forceNodeName
-      : state.selectedNode || (state.topology.nodes?.[0]?.name || "");
+      : state.selectedNode ||
+        ((state.topology &&
+          state.topology.nodes &&
+          state.topology.nodes[0] &&
+          state.topology.nodes[0].name) ||
+          "");
 
   if (state.live && !hadNodeParam && state.selectedNode) {
     return loadTopology(state.selectedNode);
@@ -464,6 +645,9 @@ function setupEvents() {
   $("liveToggle").onchange = async () => {
     await loadTopology();
   };
+
+  $("termBtn").onclick = () => openTerminal();
+  $("termFsBtn").onclick = () => toggleTerminalFullscreen();
 }
 
 async function init() {
@@ -481,6 +665,6 @@ async function init() {
 init().catch((err) => {
   setStatus("Load failed");
   console.error(err);
-  $("detailBody").textContent = String(err?.message || err);
+  $("detailBody").textContent = String(err && err.message ? err.message : err);
 });
 

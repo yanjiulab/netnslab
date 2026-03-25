@@ -150,6 +150,40 @@ body {
   color: var(--text);
 }
 
+.terminal-cta {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.terminal-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(18, 26, 43, 0.85);
+}
+
+.terminal-panel.hidden {
+  display: none;
+}
+
+.terminal-host {
+  height: calc(100vh - 340px);
+  min-height: 320px;
+}
+
+.terminal-panel.fullscreen {
+  position: fixed;
+  inset: 14px;
+  z-index: 1000;
+}
+
+.terminal-panel.fullscreen .terminal-host {
+  height: auto;
+  height: calc(100vh - 28px);
+}
+
 .tag {
   display: inline-block;
   padding: 2px 8px;

@@ -137,6 +137,9 @@ func Serve(addr, labFilter string) error {
 		_ = json.NewEncoder(w).Encode(topo)
 	})
 
+	// Interactive node terminal (websocket + PTY).
+	mux.HandleFunc("/ws/labs/", terminalWSHandler(labFilter))
+
 	logx.S().Infof("ui listening on %s", addr)
 	return http.ListenAndServe(addr, mux)
 }
