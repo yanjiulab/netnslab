@@ -108,6 +108,7 @@ Default layout (see `internal/netns/paths.go`):
 | `validate -f FILE` | Validate YAML topology without deploying |
 | `destroy LAB` | Tear down deployed lab by lab name |
 | `list` | List deployed labs |
+| `ui serve` | Serve visual topology UI and APIs |
 | `show LAB` | Live summary (IPs + link **netem** summary) |
 | `graph LAB` | Graphviz DOT with live interface IPs |
 | `enter LAB NODE` | Interactive shell in node netns |

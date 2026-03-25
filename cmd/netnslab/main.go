@@ -44,6 +44,7 @@ func newRootCommand() *cobra.Command {
 	cmd.AddCommand(
 		cli.NewDeployCommand(),
 		cli.NewValidateCommand(),
+		cli.NewUIServeCommand(),
 		cli.NewDestroyCommand(),
 		cli.NewExecCommand(),
 		cli.NewEnterCommand(),
