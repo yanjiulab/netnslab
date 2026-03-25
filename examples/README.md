@@ -1,7 +1,8 @@
 ## netnslab Examples
 
-This directory contains example lab configurations for netnslab. All files use
-the YAML schema described in `TODO.md` (name, routing, addressing, mgmt, topology).
+This directory contains example lab configurations for netnslab. The YAML schema
+is summarized in the project [`README.md`](../README.md) (`name`, `routing`,
+`addressing`, `mgmt`, `topology.nodes`, `topology.links`).
 
 **Link `netem` (optional):** under a link, you may set `netem.delay_ms`, `netem.jitter_ms`,
 and/or `netem.loss_percent`. Deploy runs `tc qdisc replace … netem` on **both** endpoints
@@ -33,7 +34,7 @@ sudo ./netnslab graph <name_from_yaml> > /tmp/lab.dot
 sudo ./examples/demo-ping-test.sh
 
 # Destroy
-sudo ./netnslab destroy -f examples/<file>.yaml
+sudo ./netnslab destroy <name_from_yaml>
 ```
 
 You must run netnslab as root (or via sudo), because it manipulates network
@@ -47,8 +48,9 @@ namespaces and interfaces.
   - 2 routers: `r1`, `r2`
   - 2 bridges: `br1`, `br2`
 - **Addressing**:
-  - `r1:eth1` - `r2:eth1` use a manually specified `10.1.1.0/30` link.
+  - Router–router link uses automatic `/30` from `addressing.p2p` (see YAML; optional per-link `ipv4` overrides).
   - Access links (hosts and bridges) use automatic `/24` LAN subnets from `10.2.0.0/16`.
+- **Node extras**: `h1` sets `sysctl`, `env`, and `exec` (startup script after deploy).
 - **Routing**:
   - `routing.auto_static: true` enables BFS-based automatic static routing between routers.
 - **Mgmt**:
@@ -59,7 +61,7 @@ Usage:
 ```bash
 sudo ./netnslab deploy -f examples/demo-lab.yaml --debug
 sudo ./netnslab enter demo-lab r1
-sudo ./netnslab destroy -f examples/demo-lab.yaml
+sudo ./netnslab destroy demo-lab
 ```
 
 ### 2. `simple-2host-1router.yaml`
@@ -80,7 +82,7 @@ Usage:
 ```bash
 sudo ./netnslab deploy -f examples/simple-2host-1router.yaml
 sudo ./netnslab enter simple-lab r1
-sudo ./netnslab destroy -f examples/simple-2host-1router.yaml
+sudo ./netnslab destroy simple-lab
 ```
 
 ### 3. `manual-ip-ring-3routers.yaml`
@@ -100,7 +102,7 @@ Usage:
 ```bash
 sudo ./netnslab deploy -f examples/manual-ip-ring-3routers.yaml
 sudo ./netnslab enter ring3-lab r1
-sudo ./netnslab destroy -f examples/manual-ip-ring-3routers.yaml
+sudo ./netnslab destroy ring3-lab
 ```
 
 ### 4. `bridge-only-lan.yaml`
@@ -121,6 +123,6 @@ Usage:
 ```bash
 sudo ./netnslab deploy -f examples/bridge-only-lan.yaml
 sudo ./netnslab enter bridge-lab h1
-sudo ./netnslab destroy -f examples/bridge-only-lan.yaml
+sudo ./netnslab destroy bridge-lab
 ```
 

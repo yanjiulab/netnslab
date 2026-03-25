@@ -44,6 +44,11 @@ func NewCaptureCommand() *cobra.Command {
 			c := exec.Command("ip", ipArgs...)
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
+			nodeEnv, err := netns.ReadNodeEnvFile(labName, nodeName)
+			if err != nil {
+				return fmt.Errorf("read node env: %w", err)
+			}
+			c.Env = netns.MergeEnviron(os.Environ(), nodeEnv)
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Saving capture to %s\n", pcapPath)
 			return c.Run()

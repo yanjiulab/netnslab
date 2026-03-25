@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,14 +36,35 @@ func validate(cfg *Config) error {
 		merr.Add(&FieldError{Field: "name", Message: "must not be empty"})
 	}
 
-	if cfg.Topology.Nodes == nil || len(cfg.Topology.Nodes) == 0 {
+	if len(cfg.Topology.Nodes) == 0 {
 		merr.Add(&FieldError{Field: "topology.nodes", Message: "must contain at least one node"})
 	}
-	if cfg.Topology.Links == nil || len(cfg.Topology.Links) == 0 {
+	validKinds := map[string]struct{}{
+		"host": {}, "router": {}, "bridge": {},
+	}
+	for name, node := range cfg.Topology.Nodes {
+		if node == nil {
+			merr.Add(&FieldError{Field: fmt.Sprintf("topology.nodes[%s]", name), Message: "must not be empty"})
+			continue
+		}
+		k := strings.TrimSpace(node.Kind)
+		if k == "" {
+			merr.Add(&FieldError{Field: fmt.Sprintf("topology.nodes[%s].kind", name), Message: "must not be empty"})
+			continue
+		}
+		if _, ok := validKinds[k]; !ok {
+			merr.Add(&FieldError{
+				Field:   fmt.Sprintf("topology.nodes[%s].kind", name),
+				Message: fmt.Sprintf("must be one of host, router, bridge, got %q", k),
+			})
+		}
+	}
+	if len(cfg.Topology.Links) == 0 {
 		merr.Add(&FieldError{Field: "topology.links", Message: "must contain at least one link"})
 	}
 
 	// Validate that all link endpoints reference existing nodes.
+	seenIfaces := make(map[string]map[string]string) // node -> ifname -> first endpoint field
 	for i, link := range cfg.Topology.Links {
 		if len(link.Endpoints) != 2 {
 			merr.Add(&FieldError{
@@ -52,12 +74,47 @@ func validate(cfg *Config) error {
 			continue
 		}
 		for j, ep := range link.Endpoints {
-			nodeName, _ := splitEndpoint(ep)
+			field := fmt.Sprintf("topology.links[%d].endpoints[%d]", i, j)
+			nodeName, ifName := splitEndpoint(ep)
+			if strings.TrimSpace(nodeName) == "" {
+				merr.Add(&FieldError{
+					Field:   field,
+					Message: "endpoint must not be empty",
+				})
+				continue
+			}
 			if _, ok := cfg.Topology.Nodes[nodeName]; !ok {
 				merr.Add(&FieldError{
-					Field:   fmt.Sprintf("topology.links[%d].endpoints[%d]", i, j),
+					Field:   field,
 					Message: fmt.Sprintf("references unknown node %q", nodeName),
 				})
+			}
+			if strings.TrimSpace(ifName) == "" {
+				merr.Add(&FieldError{
+					Field:   field,
+					Message: "endpoint must include interface name (node:ifname)",
+				})
+				continue
+			}
+			if !isValidIfaceName(ifName) {
+				merr.Add(&FieldError{
+					Field:   field,
+					Message: fmt.Sprintf("invalid interface name %q (allowed: [A-Za-z0-9_.-], length 1-15)", ifName),
+				})
+				continue
+			}
+			m, ok := seenIfaces[nodeName]
+			if !ok {
+				m = make(map[string]string)
+				seenIfaces[nodeName] = m
+			}
+			if firstField, exists := m[ifName]; exists {
+				merr.Add(&FieldError{
+					Field:   field,
+					Message: fmt.Sprintf("duplicate interface %q on node %q (already used by %s)", ifName, nodeName, firstField),
+				})
+			} else {
+				m[ifName] = field
 			}
 		}
 		if link.Netem != nil {
@@ -86,7 +143,7 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	// Validate addressing pools (basic CIDR check; overlap detection can be added later).
+	// Validate addressing pools (IPv4 CIDR; pairwise overlap detection for IPv4 only).
 	if cfg.Addressing.P2P != "" {
 		if _, _, err := net.ParseCIDR(cfg.Addressing.P2P); err != nil {
 			merr.Add(&FieldError{Field: "addressing.p2p", Message: "must be a valid IPv4 CIDR"})
@@ -102,6 +159,7 @@ func validate(cfg *Config) error {
 			merr.Add(&FieldError{Field: "addressing.loopback", Message: "must be a valid IPv4 CIDR"})
 		}
 	}
+	validateIPv4PoolOverlap(cfg, &merr)
 
 	return merr.NilOrError()
 }
@@ -115,6 +173,20 @@ func splitEndpoint(ep string) (node string, ifName string) {
 		}
 	}
 	return ep, ""
+}
+
+func isValidIfaceName(ifName string) bool {
+	if len(ifName) == 0 || len(ifName) > 15 {
+		return false
+	}
+	for i := 0; i < len(ifName); i++ {
+		c := ifName[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // SplitEndpointPublic exposes splitEndpoint for other packages that need
@@ -135,4 +207,3 @@ func IsValidationError(err error) bool {
 	}
 	return false
 }
-

@@ -10,6 +10,7 @@
 - **Management network**: Optional `mgmt` bridge on the host and per-node `eth0`.
 - **Hosts**: Default route via the **local segment router** (same bridge or direct link); **routers** get `net.ipv4.ip_forward=1` unless overridden in YAML.
 - **Link impairment**: Optional per-link **`netem`** (`delay_ms`, `jitter_ms`, `loss_percent`) via `tc` on **both** endpoints (needs `sch_netem` and `tc`).
+- **Per-node options**: `sysctl` (applied in netns), **`env`** (written to `node-env.json` and merged into `exec` / `enter` / `capture`), **`exec`** (shell snippet run via `bash -c` after routes; inherits `env`).
 - **CLI**: `deploy`, `destroy`, `enter`, `exec`, `list`, `show`, `graph`, `capture`, global `--debug`.
 - **Runtime state**: After deploy, `lab-state.json` under the lab run directory drives `show` / `graph` (live IPs from `ip` in netns).
 
@@ -24,8 +25,7 @@
 ## Build
 
 ```bash
-go build -o netnslab ./cmd/netnslab
-./netnslab --version   # prints 0.1.0; override at link time with -ldflags "-X main.version=..."
+./build.sh
 ```
 
 ## Quick start
@@ -35,11 +35,11 @@ sudo ./netnslab deploy -f examples/demo-lab.yaml --debug
 sudo ./netnslab show demo-lab
 sudo ./netnslab enter demo-lab h1
 sudo ./netnslab graph demo-lab > /tmp/lab.dot
-sudo ./netnslab destroy -f examples/demo-lab.yaml
+sudo ./netnslab destroy demo-lab
 ```
 
-- **`deploy` / `destroy`** require **`-f`** pointing at the topology YAML.
-- **`show`**, **`graph`**, **`enter`**, **`exec`**, **`capture`** use the **lab name** (the `name:` field in YAML), not `-f`.
+- **`deploy`** requires **`-f`** pointing at the topology YAML.
+- **`destroy`**, **`show`**, **`graph`**, **`enter`**, **`exec`**, **`capture`** use the **lab name** (the `name:` field in YAML).
 
 See [`examples/README.md`](examples/README.md) for more sample topologies and scripts.
 
@@ -76,11 +76,28 @@ links:
       loss_percent: 0.1
 ```
 
+Optional **per-node** `sysctl`, `env`, and `exec` (see `examples/demo-lab.yaml`):
+
+```yaml
+topology:
+  nodes:
+    h1:
+      kind: host
+      sysctl:
+        net.core.somaxconn: "65535"
+      env:
+        DEBUG: "1"
+      exec: |
+        ping -c 3 1.1.1.1 > /var/log/h1-ping.log 2>&1 &
+```
+
+Validation rejects unknown `kind` values and **overlapping IPv4** among `addressing.p2p`, `addressing.lan`, `addressing.loopback`, and `mgmt.ipv4` (when mgmt is enabled).
+
 ## Runtime paths
 
 Default layout (see `internal/netns/paths.go`):
 
-- State and per-node dirs: under **`/var/run/netnslab/<lab>/`** (includes `lab-state.json`).
+- State and per-node dirs: under **`/var/run/netnslab/<lab>/`** (includes `lab-state.json` and per-node `node-env.json` when `env` is set).
 - Logs: **`/var/log/netnslab/<lab>/`**.
 
 ## CLI reference (short)
@@ -88,7 +105,7 @@ Default layout (see `internal/netns/paths.go`):
 | Command | Description |
 |--------|-------------|
 | `deploy -f FILE` | Build lab from YAML |
-| `destroy -f FILE` | Tear down lab from YAML |
+| `destroy LAB` | Tear down deployed lab by lab name |
 | `list` | List deployed labs |
 | `show LAB` | Live summary (IPs + link **netem** summary) |
 | `graph LAB` | Graphviz DOT with live interface IPs |

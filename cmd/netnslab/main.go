@@ -11,7 +11,7 @@ import (
 	"github.com/yanjiulab/netnslab/internal/cli"
 )
 
-// version is the release version (override at build time with -ldflags "-X main.version=...").
+// Version is the release version (override at build time: build.sh or -ldflags "-X main.Version=...").
 var (
 	Version = "dev"
 	Commit  = "none"

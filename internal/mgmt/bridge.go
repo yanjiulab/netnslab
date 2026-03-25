@@ -49,15 +49,24 @@ func SetupMgmtBridge(cfg *config.Config) error {
 
 // TeardownMgmtBridge removes per-node management veths and the host bridge.
 func TeardownMgmtBridge(cfg *config.Config) error {
-	if !cfg.Mgmt.Enable {
+	nodeNames := make([]string, 0, len(cfg.Topology.Nodes))
+	for nodeName := range cfg.Topology.Nodes {
+		nodeNames = append(nodeNames, nodeName)
+	}
+	return TeardownMgmtByLab(cfg.Name, cfg.Mgmt.Enable, nodeNames)
+}
+
+// TeardownMgmtByLab removes management interfaces and bridge by persisted lab state.
+func TeardownMgmtByLab(labName string, mgmtEnabled bool, nodeNames []string) error {
+	if !mgmtEnabled {
 		return nil
 	}
 
-	bridgeName := mgmtBridgeName(cfg.Name)
+	bridgeName := mgmtBridgeName(labName)
 
 	// Delete host-side management veth interfaces.
-	for nodeName := range cfg.Topology.Nodes {
-		hostIf := netns.MgmtHostInterfaceName(cfg.Name, nodeName, "eth0")
+	for _, nodeName := range nodeNames {
+		hostIf := netns.MgmtHostInterfaceName(labName, nodeName, "eth0")
 		_ = netns.DeleteLink(hostIf)
 		// Backward-compatible cleanup for links created by older versions.
 		_ = netns.DeleteLink(fmt.Sprintf("m-%s-%s", nodeName, "eth0"))
