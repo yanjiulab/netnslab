@@ -1,4 +1,4 @@
-name: demo-lab
+name: demo
 
 routing:
   auto_static: true
@@ -25,6 +25,10 @@ topology:
 
     h2:
       kind: host
+    h3:
+      kind: host
+    h4:
+      kind: host
 
     r1:
       kind: router
@@ -48,7 +52,9 @@ topology:
 
     - endpoints: ["r1:eth2", "br1:eth1"]
     - endpoints: ["h1:eth1", "br1:eth2"]
-
+    - endpoints: ["h2:eth1", "br1:eth3"]
     - endpoints: ["r2:eth2", "br2:eth1"]
-    - endpoints: ["h2:eth1", "br2:eth2"]
+    - endpoints: ["h3:eth1", "br2:eth2"]
+    - endpoints: ["h4:eth1", "br2:eth3"]
+
 
