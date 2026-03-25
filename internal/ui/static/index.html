@@ -34,7 +34,14 @@
         </label>
         <label class="control">
           <input id="liveToggle" type="checkbox" checked />
-          Live routes + TC
+          Live Details
+        </label>
+        <label class="control">
+          View:
+          <select id="viewModeSelect">
+            <option value="topo">Topology</option>
+            <option value="terminal">Terminal</option>
+          </select>
         </label>
       </div>
 
@@ -43,34 +50,43 @@
       </div>
     </header>
 
-    <main class="layout">
-      <aside class="panel" id="nodesPanel">
+    <main class="fixed-layout">
+      <!-- Left: Nodes -->
+      <aside class="panel nodes-pane">
         <h3>Nodes</h3>
         <div id="nodesList" class="nodes"></div>
       </aside>
 
-      <section class="panel graph-panel">
-        <div class="graph-title">
-          Topology
-          <span id="graphHint" class="hint">(Cytoscape layout)</span>
+      <!-- Center: Topology or Terminal -->
+      <section class="panel center-pane">
+        <div id="topoView" class="center-view">
+          <div class="graph-title">
+            Topology
+            <span id="graphHint" class="hint">(Cytoscape layout)</span>
+          </div>
+          <div id="topologyGraph" class="topology"></div>
         </div>
-        <div id="topologyGraph" class="topology"></div>
+
+        <div id="terminalView" class="center-view hidden">
+          <div class="terminal-tabs-bar">
+            <div id="terminalTabs" class="terminal-tabs"></div>
+          </div>
+          <div class="terminal-tabs-body" id="terminalTabsBody"></div>
+          <div id="terminalEmpty" class="terminal-empty">
+            Select nodes by double-click when <span class="kbd">Terminal</span> view is active.
+          </div>
+        </div>
       </section>
 
-      <aside class="panel" id="detailPanel">
+      <!-- Right: Details -->
+      <aside class="panel details-pane">
         <h3>Details</h3>
-        <div id="detailBody" class="detail">Select a node</div>
-
-        <div class="terminal-cta">
-          <button id="termBtn" class="btn">Open Terminal</button>
-          <button id="termFsBtn" class="btn">Fullscreen</button>
-        </div>
-
-        <div id="terminalPanel" class="terminal-panel hidden">
-          <div class="terminal-host" id="terminalHost"></div>
+        <div class="details-body">
+          <div id="detailBody" class="detail">Select a node</div>
         </div>
       </aside>
     </main>
+    <div id="edgeFloat" class="edge-float hidden"></div>
 
     <script src="/ui/vendor/cytoscape.min.js"></script>
     <script src="/ui/vendor/xterm.js"></script>

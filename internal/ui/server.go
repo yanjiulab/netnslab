@@ -29,11 +29,22 @@ type uiNode struct {
 	Ifaces  []uiIface `json:"ifaces,omitempty"`
 	HasMgmt bool      `json:"has_mgmt"`
 	Routes  []string  `json:"routes,omitempty"`
+	Neigh   []string  `json:"neigh,omitempty"`
 }
 
 type uiIface struct {
 	IfName    string `json:"ifname"`
 	IPv4      string `json:"ipv4"`
+	Mac       string `json:"mac,omitempty"`
+	MTU       int    `json:"mtu,omitempty"`
+	RxPackets uint64 `json:"rx_packets,omitempty"`
+	RxBytes   uint64 `json:"rx_bytes,omitempty"`
+	RxErrors  uint64 `json:"rx_errors,omitempty"`
+	RxDropped uint64 `json:"rx_dropped,omitempty"`
+	TxPackets uint64 `json:"tx_packets,omitempty"`
+	TxBytes   uint64 `json:"tx_bytes,omitempty"`
+	TxErrors  uint64 `json:"tx_errors,omitempty"`
+	TxDropped uint64 `json:"tx_dropped,omitempty"`
 	Up        bool   `json:"up"`
 	OperState string `json:"operstate,omitempty"`
 	TcQdisc   string `json:"tc,omitempty"`
@@ -221,6 +232,7 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 	upByNodeIf := make(map[string]map[string]bool)
 	operByNodeIf := make(map[string]map[string]string)
 	tcByNodeIf := make(map[string]map[string]string) // only for selectedNode
+	metaByNodeIf := make(map[string]map[string]netns.IfaceMeta)
 
 	for _, nodeName := range nodeNames {
 		if ipByNodeIf[nodeName] == nil {
@@ -236,6 +248,7 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 		}
 		if needSelectedLive && nodeName == selectedNode {
 			tcByNodeIf[nodeName] = make(map[string]string)
+			metaByNodeIf[nodeName] = make(map[string]netns.IfaceMeta)
 		}
 
 		for ifName := range ifacesByNode[nodeName] {
@@ -246,14 +259,17 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 				operByNodeIf[nodeName][ifName] = oper
 				if needSelectedLive && nodeName == selectedNode {
 					tcByNodeIf[nodeName][ifName] = netns.QueryTcQdisc(labName, nodeName, ifName)
+					metaByNodeIf[nodeName][ifName] = netns.QueryIfaceMeta(labName, nodeName, ifName)
 				}
 			}
 		}
 	}
 
 	var routesSelected []string
+	var neighSelected []string
 	if needSelectedLive {
 		routesSelected = netns.QueryRoutes(labName, selectedNode)
+		neighSelected = netns.QueryNeighbors(labName, selectedNode)
 	}
 
 	for _, nodeName := range nodeNames {
@@ -272,6 +288,17 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 				ui.OperState = operByNodeIf[nodeName][ifName]
 				if needSelectedLive && nodeName == selectedNode {
 					ui.TcQdisc = tcByNodeIf[nodeName][ifName]
+					meta := metaByNodeIf[nodeName][ifName]
+					ui.Mac = meta.Mac
+					ui.MTU = meta.MTU
+					ui.RxPackets = meta.RxPackets
+					ui.RxBytes = meta.RxBytes
+					ui.RxErrors = meta.RxErrors
+					ui.RxDropped = meta.RxDropped
+					ui.TxPackets = meta.TxPackets
+					ui.TxBytes = meta.TxBytes
+					ui.TxErrors = meta.TxErrors
+					ui.TxDropped = meta.TxDropped
 				}
 			}
 			ifaces = append(ifaces, ui)
@@ -294,6 +321,12 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 			Routes: func() []string {
 				if needSelectedLive && nodeName == selectedNode {
 					return routesSelected
+				}
+				return nil
+			}(),
+			Neigh: func() []string {
+				if needSelectedLive && nodeName == selectedNode {
+					return neighSelected
 				}
 				return nil
 			}(),

@@ -4,18 +4,16 @@ const state = {
   topology: null,
   timer: null,
   selectedNode: "",
+  selectedEdgeId: "",
   live: true,
   cy: null,
   cyLayoutHash: "",
   layoutName: "cose",
-  terminal: {
-    ws: null,
-    term: null,
-    fit: null,
-    node: "",
-    open: false,
-    ro: null,
-  },
+  centerMode: "topo",
+  terminalTabs: {}, // sessionId -> {ws, term, fit, hostEl, tabEl}
+  terminalTabOrder: [], // ordered list of sessionIds
+  terminalActiveNode: "", // actually stores active sessionId in terminal mode
+  terminalSessionSeq: 0,
 };
 
 async function apiGet(url) {
@@ -31,8 +29,37 @@ function $(id) {
   return document.getElementById(id);
 }
 
+function updateMainHeightVar() {
+  const topbar = document.querySelector(".topbar");
+  const topbarH = topbar ? topbar.offsetHeight : 72;
+  const mainH = Math.max(240, window.innerHeight - topbarH - 2);
+  document.documentElement.style.setProperty("--main-h", `${mainH}px`);
+}
+
 function setStatus(text) {
   $("status").textContent = text;
+}
+
+function edgeFloatEl() {
+  return $("edgeFloat");
+}
+
+function hideEdgeFloat() {
+  const el = edgeFloatEl();
+  if (!el) return;
+  el.textContent = "";
+  el.classList.add("hidden");
+}
+
+function showEdgeFloat(text, clientX, clientY) {
+  const el = edgeFloatEl();
+  if (!el || !text) return;
+  el.textContent = text;
+  el.classList.remove("hidden");
+  const x = Math.max(8, Math.min(clientX + 12, window.innerWidth - 460));
+  const y = Math.max(8, Math.min(clientY + 12, window.innerHeight - 160));
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
 }
 
 function colorByKind(kind) {
@@ -54,11 +81,22 @@ function getLiveEnabled() {
 }
 
 function nodeLabel(node) {
-  return `${node.name}\n(${node.kind})`;
+  // In topology graph, only show the node name (e.g. R1).
+  return `${node.name}`;
 }
 
 function edgeLabel(link) {
   return `${link.a.ifname}<->${link.b.ifname}`;
+}
+
+function edgeFullLabel(link) {
+  const left = `${link.a.node}:${link.a.ifname}`;
+  const right = `${link.b.node}:${link.b.ifname}`;
+  const base = `${left}<->${right}`;
+  if (link.netem && link.netem !== "-") {
+    return `${base}\nnetem: ${link.netem}`;
+  }
+  return base;
 }
 
 function makeNodeId(name) {
@@ -95,10 +133,10 @@ function ensureCy() {
           "background-color": "data(color)",
           label: "data(label)",
           color: "#071020",
-          "font-size": 11,
+          "font-size": 13,
           "font-weight": 700,
           "text-wrap": "wrap",
-          "text-max-width": 90,
+          "text-max-width": 110,
           "text-valign": "center",
           "text-halign": "center",
           width: 40,
@@ -129,8 +167,8 @@ function ensureCy() {
         style: {
           width: 2,
           "line-color": "rgba(200,200,200,0.35)",
-          label: "data(label)",
-          "font-size": 10,
+          label: "",
+          "font-size": 12,
           color: "rgba(232,238,252,0.85)",
           "text-background-opacity": 0.2,
           "text-background-color": "#121a2b",
@@ -160,6 +198,8 @@ function ensureCy() {
     const name = ele.data("name");
     if (!name) return;
     state.selectedNode = name;
+    state.selectedEdgeId = "";
+    hideEdgeFloat();
     highlightSelection();
     renderNodes();
     if (state.live) {
@@ -167,6 +207,47 @@ function ensureCy() {
       return;
     }
     renderDetail();
+  });
+
+  // Edge click -> show full link info (do not render link label on canvas).
+  state.cy.on("tap", "edge", (evt) => {
+    if (state.centerMode !== "topo") return;
+    const edge = evt.target;
+    const id = edge.id();
+    const full =
+      edge.data("fullLabel") ||
+      `${edge.data("ifA")}<->${edge.data("ifB")}` +
+        (edge.data("netem") && edge.data("netem") !== "-"
+          ? `\nnetem: ${edge.data("netem")}`
+          : "");
+
+    if (state.selectedEdgeId === id) {
+      state.selectedEdgeId = "";
+      hideEdgeFloat();
+      try {
+        edge.unselect();
+      } catch (_) {}
+      return;
+    }
+
+    state.selectedEdgeId = id;
+    edge.select();
+    let clientX = window.innerWidth / 2;
+    let clientY = window.innerHeight / 2;
+    const oe = evt.originalEvent;
+    if (oe && typeof oe.clientX === "number" && typeof oe.clientY === "number") {
+      clientX = oe.clientX;
+      clientY = oe.clientY;
+    }
+    showEdgeFloat(full, clientX, clientY);
+  });
+
+  // Click background -> clear edge info.
+  state.cy.on("tap", (evt) => {
+    if (evt.target === state.cy) {
+      state.selectedEdgeId = "";
+      hideEdgeFloat();
+    }
   });
 
   // Drag to pin.
@@ -269,7 +350,8 @@ function syncGraph() {
       id,
       source: makeNodeId(l.a.node),
       target: makeNodeId(l.b.node),
-      label: edgeLabel(l),
+      label: edgeLabel(l), // used for fallback/other tooling; edge label display is controlled by Cytoscape styles
+      fullLabel: edgeFullLabel(l),
       netem: l.netem || "-",
       ifA: l.a.ifname,
       ifB: l.b.ifname,
@@ -296,12 +378,8 @@ function syncGraph() {
     else n.unlock();
   });
 
-  // Tooltips for edges (netem only).
-  cy.edges().forEach((e) => {
-    const netem = e.data("netem");
-    const tt = netem && netem !== "-" ? `netem: ${netem}` : `${e.data("ifA")}<->${e.data("ifB")}`;
-    e.data("tooltip", tt);
-  });
+  // Note: we intentionally do not render edge labels on canvas.
+  // Full link info is shown on edge click via the `edgeInfo` overlay.
 
   // Layout only if topology changed.
   const h = layoutHash(topo);
@@ -347,8 +425,11 @@ function renderNodes() {
     };
     btn.innerHTML = `
       <div><strong>${n.name}</strong> <span class="tag">${n.kind}</span></div>
-      <div class="node-sub">mgmt: ${n.mgmt_ip || "-"}</div>
     `;
+    btn.ondblclick = () => {
+      if (state.centerMode !== "terminal") return;
+      openTerminalForNode(n.name);
+    };
     list.appendChild(btn);
   });
 }
@@ -362,124 +443,250 @@ function renderDetail() {
     return;
   }
   state.selectedNode = n.name;
-
-  const mgmtLine = `mgmt eth0: ${n.mgmt_ip || "-"}`;
   const routes = Array.isArray(n.routes) ? n.routes : [];
-  const routesBlock = routes.length ? routes.join("\n") : "-";
+  const routesBlock = routes.length
+    ? routes
+        .map((r) => {
+          const isDefault = r.startsWith("default ");
+          const metricMatch = r.match(/\bmetric\s+(\d+)/);
+          const parts = [];
+          if (metricMatch && metricMatch[1]) parts.push(`metric=${metricMatch[1]}`);
+          const suffix = parts.length ? `  [${parts.join(", ")}]` : "";
+          return `${isDefault ? "* " : "  "}${r}${suffix}`;
+        })
+        .join("\n")
+    : "-";
   const ifaces = n.ifaces || [];
   const ifaceLines = ifaces.length
     ? ifaces
         .map((i) => {
           const stateStr = state.live ? (i.up ? "UP" : "DOWN") : "-";
           const oper = state.live && i.operstate ? ` (${i.operstate})` : "";
-          return `- ${i.ifname}: ${i.ipv4 || "-"} [${stateStr}]${oper}`;
+          const mac = i.mac ? ` mac=${i.mac}` : "";
+          const mtu = i.mtu ? ` mtu=${i.mtu}` : "";
+          const hasStats = i.rx_packets !== undefined || i.tx_packets !== undefined;
+          const rxPackets = i.rx_packets !== undefined ? i.rx_packets : 0;
+          const rxBytes = i.rx_bytes !== undefined ? i.rx_bytes : 0;
+          const rxDropped = i.rx_dropped !== undefined ? i.rx_dropped : 0;
+          const rxErrors = i.rx_errors !== undefined ? i.rx_errors : 0;
+          const txPackets = i.tx_packets !== undefined ? i.tx_packets : 0;
+          const txBytes = i.tx_bytes !== undefined ? i.tx_bytes : 0;
+          const txDropped = i.tx_dropped !== undefined ? i.tx_dropped : 0;
+          const txErrors = i.tx_errors !== undefined ? i.tx_errors : 0;
+          const rx = ` rx[pkt=${rxPackets} bytes=${rxBytes} drop=${rxDropped} err=${rxErrors}]`;
+          const tx = ` tx[pkt=${txPackets} bytes=${txBytes} drop=${txDropped} err=${txErrors}]`;
+          const statsFlag = ` stats=${hasStats ? "present" : "missing"}`;
+          return `- ${i.ifname}: ${i.ipv4 || "-"} [${stateStr}]${oper}${mac}${mtu}${rx}${tx}${statsFlag}`;
         })
         .join("\n")
     : "-";
-
-  let tcBlock = "";
-  if (ifaces.some((i) => i.tc)) {
-    const chunks = ifaces
-      .filter((i) => i.tc && i.tc.trim().length)
-      .map((i) => `\n--- tc qdisc: ${i.ifname} ---\n${i.tc}`);
-    tcBlock = chunks.join("\n");
-  }
+  const neigh = Array.isArray(n.neigh) ? n.neigh : [];
+  const neighBlock = neigh.length ? neigh.join("\n") : "-";
 
   $("detailBody").innerHTML = `
-    <p><span class="tag">${n.kind}</span></p>
     <p><strong>Node:</strong> ${n.name}</p>
-    <p><strong>${mgmtLine}</strong></p>
     <h4 class="section-title">Routing table</h4>
     <pre>${escapeHtml(routesBlock)}</pre>
     <h4 class="section-title">Interfaces (up/down)</h4>
     <pre>${escapeHtml(ifaceLines)}</pre>
-    ${
-      tcBlock
-        ? `<h4 class="section-title">TC qdisc (live)</h4><pre>${escapeHtml(tcBlock)}</pre>`
-        : ""
-    }
+    <h4 class="section-title">Neighbors (ARP/NDP)</h4>
+    <pre>${escapeHtml(neighBlock)}</pre>
   `;
 }
 
-function getTerminalSelectedNode() {
-  if (state.selectedNode && String(state.selectedNode).trim()) {
-    return state.selectedNode;
+function setCenterMode(mode) {
+  state.centerMode = mode === "terminal" ? "terminal" : "topo";
+  updateMainHeightVar();
+
+  const topoView = $("topoView");
+  const terminalView = $("terminalView");
+  if (topoView) topoView.classList.toggle("hidden", state.centerMode !== "topo");
+  if (terminalView)
+    terminalView.classList.toggle("hidden", state.centerMode !== "terminal");
+
+  if (state.centerMode !== "topo") {
+    state.selectedEdgeId = "";
+    hideEdgeFloat();
   }
-  const nodes =
-    state.topology && state.topology.nodes ? state.topology.nodes : [];
-  if (nodes.length) return nodes[0].name;
-  return "";
+
+  // Resize graph when becoming visible.
+  if (state.centerMode === "topo") {
+    // Run on next frame so the container has final size.
+    requestAnimationFrame(() => {
+      try {
+        if (state.cy) {
+          state.cy.resize();
+          runLayout(false);
+        }
+      } catch (_) {}
+    });
+  } else {
+    // Ensure active terminal is visible & properly sized.
+    if (state.terminalActiveNode || state.terminalTabOrder.length) {
+      const pick =
+        state.terminalActiveNode ||
+        state.terminalTabOrder[0] ||
+        "";
+      if (pick) {
+        selectTerminalTab(pick);
+        requestAnimationFrame(() => {
+          terminalSendResizeForSession(pick);
+        });
+      }
+    }
+  }
 }
 
-function terminalPanelEl() {
-  return $("terminalPanel");
+function terminalTabsEl() {
+  return $("terminalTabs");
 }
 
-function terminalHostEl() {
-  return $("terminalHost");
+function terminalTabsBodyEl() {
+  return $("terminalTabsBody");
 }
 
-function setTerminalVisible(visible) {
-  const panel = terminalPanelEl();
-  if (!panel) return;
-  if (visible) panel.classList.remove("hidden");
-  else panel.classList.add("hidden");
+function terminalEmptyEl() {
+  return $("terminalEmpty");
 }
 
-function setTerminalFullscreen(fullscreen) {
-  const panel = terminalPanelEl();
-  if (!panel) return;
-  if (fullscreen) panel.classList.add("fullscreen");
-  else panel.classList.remove("fullscreen");
+function terminalHostId(sessionId) {
+  return `terminalHost_${encodeURIComponent(sessionId)}`;
 }
 
-function terminalSendResize() {
-  const t = state.terminal;
-  if (!t.ws || !t.term) return;
-  if (t.ws.readyState !== WebSocket.OPEN) return;
-  t.ws.send(
-    JSON.stringify({ type: "resize", cols: t.term.cols, rows: t.term.rows })
+function terminalTabId(sessionId) {
+  return `terminalTab_${encodeURIComponent(sessionId)}`;
+}
+
+function terminalSendResizeForSession(sessionId) {
+  const tab = state.terminalTabs[sessionId];
+  if (!tab || !tab.ws || !tab.term) return;
+  if (tab.ws.readyState !== WebSocket.OPEN) return;
+  tab.ws.send(
+    JSON.stringify({
+      type: "resize",
+      cols: tab.term.cols,
+      rows: tab.term.rows,
+    })
   );
 }
 
-async function openTerminal() {
-  const nodeName = getTerminalSelectedNode();
-  if (!nodeName) {
-    setStatus("No node selected");
-    return;
+function ensureTerminalEmptyState() {
+  const el = terminalEmptyEl();
+  if (!el) return;
+  const cnt = state.terminalTabOrder.length;
+  el.classList.toggle("hidden", cnt > 0);
+}
+
+function selectTerminalTab(sessionId) {
+  if (!state.terminalTabs[sessionId]) return;
+  state.terminalActiveNode = sessionId;
+
+  // Update tab active styles and show only active host.
+  Object.keys(state.terminalTabs).forEach((k) => {
+    const tab = state.terminalTabs[k];
+    if (!tab) return;
+    const active = k === sessionId;
+    if (tab.tabEl) tab.tabEl.classList.toggle("active", active);
+    if (tab.hostEl) tab.hostEl.classList.toggle("hidden", !active);
+  });
+
+  // Fit after becoming visible.
+  try {
+    const tab = state.terminalTabs[sessionId];
+    if (tab && tab.fit) tab.fit.fit();
+    terminalSendResizeForSession(sessionId);
+    if (tab && tab.term) tab.term.focus();
+  } catch (_) {}
+}
+
+function closeTerminalForSession(sessionId) {
+  const tab = state.terminalTabs[sessionId];
+  if (!tab) return;
+
+  // Mark as closing so handlers won't try to touch DOM after removal.
+  tab.closing = true;
+
+  try {
+    if (tab.ws) tab.ws.close();
+  } catch (_) {}
+  try {
+    if (tab.ro) tab.ro.disconnect();
+  } catch (_) {}
+  try {
+    if (tab.term) tab.term.dispose();
+  } catch (_) {}
+
+  if (tab.tabEl && tab.tabEl.parentNode) tab.tabEl.parentNode.removeChild(tab.tabEl);
+  if (tab.hostEl && tab.hostEl.parentNode) tab.hostEl.parentNode.removeChild(tab.hostEl);
+
+  delete state.terminalTabs[sessionId];
+  state.terminalTabOrder = state.terminalTabOrder.filter((x) => x !== sessionId);
+
+  if (state.terminalActiveNode === sessionId) {
+    state.terminalActiveNode = state.terminalTabOrder[0] || "";
+    if (state.centerMode === "terminal" && state.terminalActiveNode) {
+      selectTerminalTab(state.terminalActiveNode);
+    }
   }
+
+  ensureTerminalEmptyState();
+}
+
+function closeAllTerminalSessions() {
+  const ids = state.terminalTabOrder.slice();
+  ids.forEach((sid) => closeTerminalForSession(sid));
+  state.terminalActiveNode = "";
+}
+
+async function openTerminalForNode(nodeName) {
   if (!state.lab) {
     setStatus("No lab loaded");
     return;
   }
+  if (!nodeName) return;
 
-  // If already open for the same node, just show it.
-  if (state.terminal.open && state.terminal.node === nodeName) {
-    setTerminalVisible(true);
-    setTimeout(() => terminalSendResize(), 50);
+  // Always create a new terminal session (same node can have multiple tabs).
+  const sessionId = `${state.lab}:${nodeName}#${++state.terminalSessionSeq}`;
+
+  const hostArea = terminalTabsBodyEl();
+  const tabsArea = terminalTabsEl();
+  if (!hostArea || !tabsArea) {
+    setStatus("Terminal UI not ready");
     return;
   }
 
-  // Close previous session if any.
-  if (state.terminal.ws) {
-    try {
-      state.terminal.ws.close();
-    } catch (_) {}
-  }
-  state.terminal.ws = null;
-  state.terminal.term = null;
-  state.terminal.fit = null;
-  state.terminal.node = nodeName;
+  // Create tab + host container.
+  const tabEl = document.createElement("div");
+  tabEl.className = "terminal-tab";
+  tabEl.id = terminalTabId(sessionId);
+  tabEl.dataset.node = nodeName;
 
-  const host = terminalHostEl();
-  if (!host) {
-    setStatus("Terminal host not found");
-    return;
-  }
+  const titleEl = document.createElement("div");
+  titleEl.className = "terminal-tab-title";
+  titleEl.textContent = `${nodeName}@${state.lab}`;
 
-  setTerminalVisible(true);
-  setTerminalFullscreen(false);
-  $("terminalHost").innerHTML = "";
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "terminal-tab-close";
+  closeBtn.type = "button";
+  closeBtn.textContent = "×";
+  closeBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    closeTerminalForSession(sessionId);
+  };
+
+  tabEl.appendChild(titleEl);
+  tabEl.appendChild(closeBtn);
+  tabEl.onclick = () => {
+    setCenterMode("terminal");
+    selectTerminalTab(sessionId);
+  };
+
+  const hostEl = document.createElement("div");
+  hostEl.className = "terminal-tab-host hidden";
+  hostEl.id = terminalHostId(sessionId);
+
+  tabsArea.appendChild(tabEl);
+  hostArea.appendChild(hostEl);
 
   const term = new Terminal({
     cursorBlink: true,
@@ -489,30 +696,45 @@ async function openTerminal() {
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
-  term.open(host);
-  fit.fit();
+  term.open(hostEl);
 
-  state.terminal.term = term;
-  state.terminal.fit = fit;
-  state.terminal.open = true;
-
+  // Create websocket.
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const wsUrl = `${proto}://${location.host}/ws/labs/${encodeURIComponent(
     state.lab
   )}/nodes/${encodeURIComponent(nodeName)}/terminal`;
   const ws = new WebSocket(wsUrl);
-  state.terminal.ws = ws;
 
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
+  const tab = {
+    ws: ws,
+    term: term,
+    fit: fit,
+    hostEl: hostEl,
+    tabEl: tabEl,
+    ro: null,
+    closing: false,
+    nodeName: nodeName,
+  };
+  state.terminalTabs[sessionId] = tab;
+  state.terminalTabOrder.push(sessionId);
+
+  ensureTerminalEmptyState();
+  selectTerminalTab(sessionId);
+
   ws.onopen = () => {
-    terminalSendResize();
+    try {
+      fit.fit();
+      terminalSendResizeForSession(sessionId);
+    } catch (_) {}
     term.focus();
   };
 
   ws.onmessage = async (ev) => {
-    if (!state.terminal.open) return;
+    if (!state.terminalTabs[sessionId] || state.terminalTabs[sessionId].closing)
+      return;
     const data = ev.data;
     if (typeof data === "string") {
       term.write(data);
@@ -534,37 +756,31 @@ async function openTerminal() {
   };
 
   ws.onclose = () => {
-    state.terminal.open = false;
-    state.terminal.ws = null;
+    // If closed via tab button, cleanup already started.
+    if (!state.terminalTabs[sessionId]) return;
+    if (tab.closing) return;
     setStatus("Terminal closed");
+    closeTerminalForSession(sessionId);
   };
 
   term.onData((d) => {
-    if (!state.terminal.ws || state.terminal.ws.readyState !== WebSocket.OPEN) return;
+    const t = state.terminalTabs[sessionId];
+    if (!t || !t.ws || t.ws.readyState !== WebSocket.OPEN) return;
     const bytes = encoder.encode(d);
-    state.terminal.ws.send(bytes);
+    t.ws.send(bytes);
   });
 
-  // Keep PTY size in sync with container size.
-  if (state.terminal.ro) {
+  // Keep PTY size in sync with this tab's container.
+  tab.ro = new ResizeObserver(() => {
+    const t = state.terminalTabs[sessionId];
+    if (!t) return;
+    if (t.hostEl.classList.contains("hidden")) return;
     try {
-      state.terminal.ro.disconnect();
+      fit.fit();
+      terminalSendResizeForSession(sessionId);
     } catch (_) {}
-  }
-  state.terminal.ro = new ResizeObserver(() => {
-    if (!state.terminal.open) return;
-    fit.fit();
-    terminalSendResize();
   });
-  state.terminal.ro.observe(host);
-}
-
-function toggleTerminalFullscreen() {
-  const panel = terminalPanelEl();
-  if (!panel) return;
-  const full = !panel.classList.contains("fullscreen");
-  setTerminalFullscreen(full);
-  setTimeout(() => terminalSendResize(), 200);
+  tab.ro.observe(hostEl);
 }
 
 async function loadLabs() {
@@ -587,10 +803,14 @@ async function loadLabs() {
   }
 }
 
-async function loadTopology(forceNodeName) {
+async function loadTopology(forceNodeName, options) {
+  const opts = options || {};
+  const skipGraphRefresh = !!opts.skipGraphRefresh;
+  const silent = !!opts.silent;
   if (!state.lab) return;
   state.live = getLiveEnabled();
-  $("graphHint").textContent = "Loading...";
+  updateMainHeightVar();
+  if (!silent) $("graphHint").textContent = "Loading...";
   const liveFlag = state.live ? 1 : 0;
   const nodeParam = forceNodeName !== undefined ? forceNodeName : state.selectedNode || "";
   const hadNodeParam = nodeParam.trim() !== "";
@@ -609,25 +829,41 @@ async function loadTopology(forceNodeName) {
           "");
 
   if (state.live && !hadNodeParam && state.selectedNode) {
-    return loadTopology(state.selectedNode);
+    return loadTopology(state.selectedNode, opts);
   }
 
-  syncGraph();
+  if (!skipGraphRefresh) {
+    syncGraph();
+  }
   renderNodes();
   renderDetail();
 
   const d = new Date();
-  setStatus(`Updated: ${d.toLocaleTimeString()} (live=${state.live ? "on" : "off"})`);
-  $("graphHint").textContent = "Cytoscape (drag to pin, double-click to unpin)";
+  if (!silent) {
+    setStatus(
+      `Updated: ${d.toLocaleTimeString()} (live=${state.live ? "on" : "off"})`
+    );
+    $("graphHint").textContent =
+      "Cytoscape (drag to pin, double-click to unpin)";
+  }
+  if (!skipGraphRefresh && state.centerMode === "topo") {
+    requestAnimationFrame(() => {
+      try {
+        if (state.cy) state.cy.resize();
+      } catch (_) {}
+    });
+  }
 }
 
 function setupEvents() {
   $("labSelect").onchange = async (e) => {
+    closeAllTerminalSessions();
     state.lab = e.target.value;
     state.selectedNode = "";
     await loadTopology();
   };
-  $("refreshBtn").onclick = loadTopology;
+  $("refreshBtn").onclick = () =>
+    loadTopology(undefined, { skipGraphRefresh: true, silent: true });
   $("relayoutBtn").onclick = () => runLayout(true);
   $("layoutSelect").onchange = (e) => {
     state.layoutName = e.target.value || "cose";
@@ -636,7 +872,7 @@ function setupEvents() {
   $("autoRefresh").onchange = (e) => {
     if (e.target.checked) {
       if (state.timer) return;
-      state.timer = setInterval(loadTopology, 2000);
+      state.timer = setInterval(() => loadTopology(undefined, { silent: true }), 2000);
     } else {
       if (state.timer) clearInterval(state.timer);
       state.timer = null;
@@ -646,17 +882,32 @@ function setupEvents() {
     await loadTopology();
   };
 
-  $("termBtn").onclick = () => openTerminal();
-  $("termFsBtn").onclick = () => toggleTerminalFullscreen();
+  const viewSel = $("viewModeSelect");
+  if (viewSel) {
+    viewSel.onchange = () => setCenterMode(viewSel.value);
+  }
 }
 
 async function init() {
+  updateMainHeightVar();
+  window.addEventListener("resize", () => {
+    updateMainHeightVar();
+    if (state.centerMode === "topo") {
+      try {
+        if (state.cy) state.cy.resize();
+      } catch (_) {}
+    } else if (state.terminalActiveNode) {
+      terminalSendResizeForSession(state.terminalActiveNode);
+    }
+  });
+
   setupEvents();
   ensureCy();
   const ls = $("layoutSelect");
   if (ls) state.layoutName = ls.value || "cose";
   await loadLabs();
   await loadTopology();
+  setCenterMode(state.centerMode);
   if ($("autoRefresh").checked) {
     state.timer = setInterval(loadTopology, 2000);
   }
