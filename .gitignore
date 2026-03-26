@@ -42,6 +42,7 @@ Thumbs.db
 *.dot
 *.pcap
 *.png
+!ui.png
 
 # Debug
 __debug_bin

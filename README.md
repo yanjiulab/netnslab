@@ -43,6 +43,14 @@ sudo ./netnslab destroy demo-lab
 
 See [`examples/README.md`](examples/README.md) for more sample topologies and scripts.
 
+## UI preview
+
+```bash
+sudo ./netnslab ui serve
+```
+
+![netnslab UI](ui.png)
+
 ## YAML overview
 
 Top-level fields include `name`, `routing`, `addressing`, `mgmt`, and `topology` (`nodes`, `links`). Example:
