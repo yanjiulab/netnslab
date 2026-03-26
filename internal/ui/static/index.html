@@ -9,7 +9,10 @@
   </head>
   <body data-theme="light">
     <header class="topbar">
-      <div class="brand">NETNSLAB</div>
+      <div class="brand">
+        <img class="brand-icon" src="/ui/icon-netnslab.svg" alt="NETNSLAB" />
+        <span>NETNSLAB</span>
+      </div>
 
       <div class="controls">
         <label class="control">
@@ -69,7 +72,34 @@
                   <option value="breadthfirst">breadthfirst</option>
                 </select>
               </label>
-              <button id="relayoutBtn" class="btn">Relayout</button>
+              <button id="relayoutBtn" class="btn relayout-action">Relayout</button>
+              <div class="export-actions" aria-label="Export topology">
+                <button
+                  id="exportPngBtn"
+                  class="btn btn-icon btn-export"
+                  title="Export topology as PNG"
+                  aria-label="Export topology as PNG"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M12 3v10"></path>
+                    <path d="M8.5 9.5 12 13l3.5-3.5"></path>
+                    <rect x="4" y="14.5" width="16" height="6" rx="1.8"></rect>
+                  </svg>
+                </button>
+                <button
+                  id="exportSvgBtn"
+                  class="btn btn-icon btn-export"
+                  title="Export topology as SVG"
+                  aria-label="Export topology as SVG"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <rect x="4" y="4.5" width="16" height="15" rx="2"></rect>
+                    <path d="M8 9.5h8"></path>
+                    <path d="M8 13h5"></path>
+                    <path d="M13.5 16.5h2.5"></path>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
           <div id="topologyGraph" class="topology"></div>
@@ -77,6 +107,16 @@
 
         <div id="terminalView" class="center-view hidden">
           <div class="terminal-tabs-bar">
+            <label class="control control-compact terminal-theme-control">
+              Theme:
+              <select id="terminalThemeSelect">
+                <option value="auto">Auto</option>
+                <option value="dark">Dark</option>
+                <option value="classic">Classic</option>
+                <option value="ocean">Ocean</option>
+                <option value="solarized">Solarized</option>
+              </select>
+            </label>
             <div id="terminalTabs" class="terminal-tabs"></div>
           </div>
           <div class="terminal-tabs-body" id="terminalTabsBody"></div>

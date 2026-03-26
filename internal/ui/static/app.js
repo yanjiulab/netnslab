@@ -14,6 +14,8 @@ const state = {
   terminalTabOrder: [], // ordered list of sessionIds
   terminalActiveNode: "", // actually stores active sessionId in terminal mode
   terminalSessionSeq: 0,
+  terminalFontSize: 13,
+  terminalThemePreset: "auto", // auto|dark|classic|ocean|solarized
   theme: "light",
   detailSectionOpen: {
     routes: true,
@@ -130,6 +132,121 @@ function updateCyThemeStyles() {
   } catch (_) {}
 }
 
+function getTerminalTheme(theme, preset) {
+  let mode = theme === "dark" ? "dark" : "light";
+  const style = preset || state.terminalThemePreset || "auto";
+  if (style === "dark") mode = "dark";
+  const key = style === "auto" ? "classic" : style;
+
+  const themes = {
+    classic: {
+      dark: {
+        background: "#0f172a",
+        foreground: "#e2e8f0",
+        cursor: "#93c5fd",
+        cursorAccent: "#0f172a",
+        selectionBackground: "rgba(147, 197, 253, 0.30)",
+        black: "#1e293b",
+        red: "#f87171",
+        green: "#4ade80",
+        yellow: "#facc15",
+        blue: "#60a5fa",
+        magenta: "#c084fc",
+        cyan: "#22d3ee",
+        white: "#e2e8f0",
+        brightBlack: "#64748b",
+        brightRed: "#fca5a5",
+        brightGreen: "#86efac",
+        brightYellow: "#fde047",
+        brightBlue: "#93c5fd",
+        brightMagenta: "#d8b4fe",
+        brightCyan: "#67e8f9",
+        brightWhite: "#f8fafc",
+      },
+      light: {
+        background: "#ffffff",
+        foreground: "#0f172a",
+        cursor: "#1d4ed8",
+        cursorAccent: "#ffffff",
+        selectionBackground: "rgba(37, 99, 235, 0.22)",
+        black: "#334155",
+        red: "#dc2626",
+        green: "#16a34a",
+        yellow: "#ca8a04",
+        blue: "#2563eb",
+        magenta: "#9333ea",
+        cyan: "#0891b2",
+        white: "#e2e8f0",
+        brightBlack: "#64748b",
+        brightRed: "#ef4444",
+        brightGreen: "#22c55e",
+        brightYellow: "#eab308",
+        brightBlue: "#3b82f6",
+        brightMagenta: "#a855f7",
+        brightCyan: "#06b6d4",
+        brightWhite: "#f8fafc",
+      },
+    },
+    ocean: {
+      dark: {
+        background: "#0a1628",
+        foreground: "#d6e6ff",
+        cursor: "#7dd3fc",
+        cursorAccent: "#0a1628",
+        selectionBackground: "rgba(125, 211, 252, 0.25)",
+      },
+      light: {
+        background: "#f7fbff",
+        foreground: "#10233f",
+        cursor: "#0369a1",
+        cursorAccent: "#f7fbff",
+        selectionBackground: "rgba(3, 105, 161, 0.2)",
+      },
+    },
+    solarized: {
+      dark: {
+        background: "#002b36",
+        foreground: "#93a1a1",
+        cursor: "#b58900",
+        cursorAccent: "#002b36",
+        selectionBackground: "rgba(147, 161, 161, 0.20)",
+      },
+      light: {
+        background: "#fdf6e3",
+        foreground: "#657b83",
+        cursor: "#b58900",
+        cursorAccent: "#fdf6e3",
+        selectionBackground: "rgba(101, 123, 131, 0.20)",
+      },
+    },
+  };
+  const styleThemes = themes[key] || themes.classic;
+  return styleThemes[mode] || styleThemes.light;
+}
+
+function applyTerminalTheme() {
+  const termTheme = getTerminalTheme(state.theme, state.terminalThemePreset);
+  Object.keys(state.terminalTabs).forEach((sid) => {
+    const t = state.terminalTabs[sid];
+    if (!t || !t.term) return;
+    try {
+      t.term.options.theme = termTheme;
+    } catch (_) {}
+  });
+}
+
+function loadInitialTerminalThemePreset() {
+  const allowed = new Set(["auto", "dark", "classic", "ocean", "solarized"]);
+  let preset = "auto";
+  try {
+    const saved = localStorage.getItem("netnslab.terminalThemePreset");
+    if (saved && allowed.has(saved)) preset = saved;
+  } catch (_) {}
+  state.terminalThemePreset = preset;
+  const sel = $("terminalThemeSelect");
+  if (sel) sel.value = preset;
+}
+
 function setTheme(theme) {
   const finalTheme = theme === "dark" ? "dark" : "light";
   state.theme = finalTheme;
@@ -149,6 +266,7 @@ function setTheme(theme) {
     localStorage.setItem("netnslab.theme", finalTheme);
   } catch (_) {}
   updateCyThemeStyles();
+  applyTerminalTheme();
 }
 
 function loadInitialTheme() {
@@ -248,11 +366,6 @@ function ensureCy() {
           width: 2,
           "line-color": "rgba(200,200,200,0.35)",
           label: "",
-          "font-size": 12,
-          color: "rgba(232,238,252,0.85)",
-          "text-background-opacity": 0.2,
-          "text-background-color": "#121a2b",
-          "text-background-padding": 2,
           "curve-style": "bezier",
         },
       },
@@ -460,8 +573,7 @@ function syncGraph() {
     else n.unlock();
   });
 
-  // Note: we intentionally do not render edge labels on canvas.
-  // Full link info is shown on edge click via the `edgeInfo` overlay.
+  // Show interface names on links; full details are still available on edge click.
 
   // Layout only if topology changed.
   const h = layoutHash(topo);
@@ -843,6 +955,37 @@ function terminalSendResizeForSession(sessionId) {
   );
 }
 
+function clampTerminalFontSize(size) {
+  const min = 10;
+  const max = 28;
+  if (size < min) return min;
+  if (size > max) return max;
+  return size;
+}
+
+function applyTerminalFontSize() {
+  const size = clampTerminalFontSize(state.terminalFontSize || 13);
+  state.terminalFontSize = size;
+  Object.keys(state.terminalTabs).forEach((sid) => {
+    const t = state.terminalTabs[sid];
+    if (!t || !t.term) return;
+    try {
+      t.term.options.fontSize = size;
+      if (t.fit) t.fit.fit();
+      terminalSendResizeForSession(sid);
+    } catch (_) {}
+  });
+}
+
+function zoomTerminalFont(deltaY) {
+  // Smaller deltaY means zoom in, larger means zoom out.
+  const step = deltaY < 0 ? 1 : -1;
+  const next = clampTerminalFontSize((state.terminalFontSize || 13) + step);
+  if (next === state.terminalFontSize) return;
+  state.terminalFontSize = next;
+  applyTerminalFontSize();
+}
+
 function ensureTerminalEmptyState() {
   const el = terminalEmptyEl();
   if (!el) return;
@@ -973,7 +1116,8 @@ async function openTerminalForNode(nodeName) {
     cursorBlink: true,
     convertEol: true,
     scrollback: 2000,
-    fontSize: 13,
+    fontSize: state.terminalFontSize || 13,
+    theme: getTerminalTheme(state.theme, state.terminalThemePreset),
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
@@ -1062,6 +1206,18 @@ async function openTerminalForNode(nodeName) {
     } catch (_) {}
   });
   tab.ro.observe(hostEl);
+
+  // Ctrl/Meta + wheel in terminal only changes terminal font size
+  // instead of browser page zoom.
+  hostEl.addEventListener(
+    "wheel",
+    (ev) => {
+      if (!ev.ctrlKey && !ev.metaKey) return;
+      ev.preventDefault();
+      zoomTerminalFont(ev.deltaY);
+    },
+    { passive: false }
+  );
 }
 
 async function loadLabs() {
@@ -1136,6 +1292,112 @@ async function loadTopology(forceNodeName, options) {
   }
 }
 
+function exportTopologyPng() {
+  const cy = ensureCy();
+  const bg = state.theme === "dark" ? "#0b1220" : "#f3f6fb";
+  let dataUrl = "";
+  try {
+    dataUrl = cy.png({
+      full: true,
+      scale: 2,
+      bg,
+    });
+  } catch (err) {
+    setStatus("Export failed");
+    console.error(err);
+    return;
+  }
+  if (!dataUrl) {
+    setStatus("Export failed");
+    return;
+  }
+
+  const d = new Date();
+  const ts = d.toISOString().replaceAll(":", "-").replaceAll(".", "-");
+  const lab = (state.lab || "lab").replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+  const name = `topology-${lab}-${ts}.png`;
+
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setStatus(`Exported ${name}`);
+}
+
+function svgEscape(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function exportTopologySvg() {
+  const cy = ensureCy();
+  const nodes = cy.nodes();
+  const edges = cy.edges();
+  if (!nodes || !nodes.length) {
+    setStatus("Nothing to export");
+    return;
+  }
+
+  const bb = cy.elements().boundingBox();
+  const pad = 30;
+  const minX = bb.x1 - pad;
+  const minY = bb.y1 - pad;
+  const w = Math.max(200, bb.w + pad * 2);
+  const h = Math.max(140, bb.h + pad * 2);
+  const bg = state.theme === "dark" ? "#0b1220" : "#f3f6fb";
+  const edgeColor = state.theme === "dark" ? "rgba(200,200,200,0.45)" : "rgba(25,35,52,0.40)";
+  const textColor = "#0b1220";
+
+  const edgeLines = edges
+    .map((e) => {
+      const s = e.source().position();
+      const t = e.target().position();
+      return `<line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="${edgeColor}" stroke-width="2.2" />`;
+    })
+    .join("");
+
+  const nodeShapes = nodes
+    .map((n) => {
+      const p = n.position();
+      const label = svgEscape(n.data("name") || n.data("label") || "");
+      const fill = svgEscape(n.data("color") || "#3498db");
+      return [
+        `<circle cx="${p.x}" cy="${p.y}" r="20" fill="${fill}" stroke="rgba(255,255,255,0.55)" stroke-width="1.5" />`,
+        `<text x="${p.x}" y="${p.y + 4}" font-size="12" font-weight="700" text-anchor="middle" fill="${textColor}" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif">${label}</text>`,
+      ].join("");
+    })
+    .join("");
+
+  const svg = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(w)}" height="${Math.ceil(h)}" viewBox="${minX} ${minY} ${w} ${h}">`,
+    `<rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="${bg}" />`,
+    edgeLines,
+    nodeShapes,
+    "</svg>",
+  ].join("");
+
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const d = new Date();
+  const ts = d.toISOString().replaceAll(":", "-").replaceAll(".", "-");
+  const lab = (state.lab || "lab").replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+  const name = `topology-${lab}-${ts}.svg`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  setStatus(`Exported ${name}`);
+}
+
 function setupEvents() {
   $("labSelect").onchange = async (e) => {
     closeAllTerminalSessions();
@@ -1146,6 +1408,8 @@ function setupEvents() {
   };
   $("refreshBtn").onclick = () =>
     loadTopology(undefined, { skipGraphRefresh: true, silent: true });
+  $("exportPngBtn").onclick = () => exportTopologyPng();
+  $("exportSvgBtn").onclick = () => exportTopologySvg();
   $("relayoutBtn").onclick = () => runLayout(true);
   $("layoutSelect").onchange = (e) => {
     state.layoutName = e.target.value || "cose";
@@ -1184,9 +1448,21 @@ function setupEvents() {
   if (viewSel) {
     viewSel.onchange = () => setCenterMode(viewSel.value);
   }
+  const terminalThemeSel = $("terminalThemeSelect");
+  if (terminalThemeSel) {
+    terminalThemeSel.onchange = (e) => {
+      const v = String(e.target.value || "auto");
+      state.terminalThemePreset = v;
+      try {
+        localStorage.setItem("netnslab.terminalThemePreset", v);
+      } catch (_) {}
+      applyTerminalTheme();
+    };
+  }
 }
 
 async function init() {
+  loadInitialTerminalThemePreset();
   loadInitialTheme();
   updateMainHeightVar();
   window.addEventListener("resize", () => {

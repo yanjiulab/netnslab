@@ -1,0 +1,13 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NETNSLAB icon">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#bgGrad)" />
+  <circle cx="20" cy="20" r="5" fill="#ffffff" />
+  <circle cx="44" cy="20" r="5" fill="#ffffff" />
+  <circle cx="32" cy="43" r="5.5" fill="#ffffff" />
+  <path d="M24 20h16M22.5 23l6.5 14M41.5 23L35 37" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+</svg>

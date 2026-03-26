@@ -65,7 +65,18 @@ body {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.brand-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+  border-radius: 5px;
 }
 
 .controls {
@@ -307,6 +318,37 @@ body {
   gap: 10px;
 }
 
+.export-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.relayout-action {
+  margin-left: auto;
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  line-height: 1;
+  border-radius: 8px;
+}
+
+.btn-icon svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .hint {
   color: var(--muted);
   font-size: 12px;
@@ -342,14 +384,27 @@ body {
 
 /* Terminal */
 .terminal-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
+}
+
+.terminal-theme-control {
+  font-size: 12px;
+}
+
+.terminal-theme-control select {
+  min-width: 110px;
 }
 
 .terminal-tabs {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 1;
 }
 
 .terminal-tab {
