@@ -28,10 +28,6 @@
           <input id="autoRefresh" type="checkbox" checked />
           Auto refresh
         </label>
-        <label class="control">
-          <input id="liveToggle" type="checkbox" checked />
-          Live Details
-        </label>
       </div>
 
       <div class="meta">
@@ -92,7 +88,19 @@
 
       <!-- Right: Details -->
       <aside class="panel details-pane">
-        <h3>Details</h3>
+        <div class="details-head">
+          <h3>Details</h3>
+          <div class="details-controls">
+            <label class="control control-compact">
+              <input id="liveToggle" type="checkbox" checked />
+              Live
+            </label>
+            <label class="control control-compact">
+              <input id="diffToggle" type="checkbox" />
+              Diff
+            </label>
+          </div>
+        </div>
         <div class="details-body">
           <div id="detailBody" class="detail">Select a node</div>
         </div>

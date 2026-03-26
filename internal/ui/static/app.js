@@ -91,6 +91,11 @@ function getLiveEnabled() {
   return el ? !!el.checked : true;
 }
 
+function getDiffEnabled() {
+  const el = $("diffToggle");
+  return el ? !!el.checked : true;
+}
+
 function getThemePalette(theme) {
   if (theme === "dark") {
     return {
@@ -563,7 +568,7 @@ function renderDetail() {
   }
   state.selectedNode = n.name;
   const prevSnapshot = state.detailPrevByNode[n.name] || {};
-  const diffEnabled = state.live;
+  const diffEnabled = state.live && getDiffEnabled();
 
   const routes = Array.isArray(n.routes) ? n.routes : [];
   const routeLines = routes.length
@@ -1159,6 +1164,15 @@ function setupEvents() {
     state.detailPrevByNode = {};
     await loadTopology();
   };
+  const diffToggle = $("diffToggle");
+  if (diffToggle) {
+    diffToggle.onchange = () => {
+      if (!getDiffEnabled()) {
+        state.detailPrevByNode = {};
+      }
+      renderDetail();
+    };
+  }
   const themeBtn = $("themeToggle");
   if (themeBtn) {
     themeBtn.onclick = () => {

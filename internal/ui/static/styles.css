@@ -83,6 +83,11 @@ body {
   font-size: 14px;
 }
 
+.control-compact {
+  gap: 6px;
+  font-size: 12px;
+}
+
 .control select,
 .control input[type="checkbox"] {
   accent-color: #4f8cff;
@@ -173,8 +178,14 @@ body {
 }
 
 /* Nodes */
+.nodes-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .nodes-pane > h3,
-.details-pane > h3 {
+.details-head > h3 {
   margin: 0 0 8px 0;
   font-size: var(--panel-title-size);
   line-height: var(--panel-title-line);
@@ -186,6 +197,29 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+.nodes::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.nodes::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+.nodes::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 .node-row {
@@ -395,7 +429,22 @@ body {
   min-height: 0;
 }
 
-.details-pane > h3 {
+.details-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: none;
+}
+
+.details-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.details-head > h3 {
+  margin: 0;
   flex: none;
 }
 
