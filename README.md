@@ -49,7 +49,7 @@ See [`examples/README.md`](examples/README.md) for more sample topologies and sc
 sudo ./netnslab ui serve
 ```
 
-![netnslab UI](ui.png)
+![netnslab UI](./ui.png)
 
 ## YAML overview
 
