@@ -35,22 +35,22 @@ type uiNode struct {
 }
 
 type uiIface struct {
-	IfName    string `json:"ifname"`
-	IPv4      string `json:"ipv4"`
+	IfName    string   `json:"ifname"`
+	IPv4      string   `json:"ipv4"`
 	IPv6      []string `json:"ipv6,omitempty"`
-	Mac       string `json:"mac,omitempty"`
-	MTU       int    `json:"mtu,omitempty"`
-	RxPackets uint64 `json:"rx_packets,omitempty"`
-	RxBytes   uint64 `json:"rx_bytes,omitempty"`
-	RxErrors  uint64 `json:"rx_errors,omitempty"`
-	RxDropped uint64 `json:"rx_dropped,omitempty"`
-	TxPackets uint64 `json:"tx_packets,omitempty"`
-	TxBytes   uint64 `json:"tx_bytes,omitempty"`
-	TxErrors  uint64 `json:"tx_errors,omitempty"`
-	TxDropped uint64 `json:"tx_dropped,omitempty"`
-	Up        bool   `json:"up"`
-	OperState string `json:"operstate,omitempty"`
-	TcQdisc   string `json:"tc,omitempty"`
+	Mac       string   `json:"mac,omitempty"`
+	MTU       int      `json:"mtu,omitempty"`
+	RxPackets uint64   `json:"rx_packets,omitempty"`
+	RxBytes   uint64   `json:"rx_bytes,omitempty"`
+	RxErrors  uint64   `json:"rx_errors,omitempty"`
+	RxDropped uint64   `json:"rx_dropped,omitempty"`
+	TxPackets uint64   `json:"tx_packets,omitempty"`
+	TxBytes   uint64   `json:"tx_bytes,omitempty"`
+	TxErrors  uint64   `json:"tx_errors,omitempty"`
+	TxDropped uint64   `json:"tx_dropped,omitempty"`
+	Up        bool     `json:"up"`
+	OperState string   `json:"operstate,omitempty"`
+	TcQdisc   string   `json:"tc,omitempty"`
 }
 
 type uiLinkEnd struct {
@@ -112,13 +112,11 @@ func Serve(addr, labFilter string) error {
 	})
 
 	mux.HandleFunc("/api/labs/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		// Expected:
 		//   /api/labs/{lab}/topology
-		//   /api/labs/{lab}/...
+		//   /api/labs/{lab}/batch/exec
+		//   /api/labs/{lab}/batch/capture/start
+		//   /api/labs/{lab}/batch/capture/stop
 		u, err := url.Parse(r.URL.Path)
 		if err != nil {
 			http.Error(w, "invalid path", http.StatusBadRequest)
@@ -127,7 +125,7 @@ func Serve(addr, labFilter string) error {
 		p := strings.TrimPrefix(u.Path, "/api/labs/")
 		p = strings.TrimSuffix(p, "/")
 		parts := strings.Split(p, "/")
-		if len(parts) != 2 || parts[1] != "topology" {
+		if len(parts) < 2 {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
@@ -136,19 +134,141 @@ func Serve(addr, labFilter string) error {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		live := isTruthy(r.URL.Query().Get("live"))
-		selectedNode := strings.TrimSpace(r.URL.Query().Get("node"))
-		topo, err := buildTopology(labName, live, selectedNode)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				http.Error(w, fmt.Sprintf("lab %q not deployed", labName), http.StatusNotFound)
+		if len(parts) == 2 && parts[1] == "topology" {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			live := isTruthy(r.URL.Query().Get("live"))
+			selectedNode := strings.TrimSpace(r.URL.Query().Get("node"))
+			topo, err := buildTopology(labName, live, selectedNode)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					http.Error(w, fmt.Sprintf("lab %q not deployed", labName), http.StatusNotFound)
+					return
+				}
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(topo)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(topo)
+
+		if len(parts) == 3 && parts[1] == "batch" && parts[2] == "exec" {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var req batchExecRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			resp, err := runBatchExec(labName, req)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		if len(parts) == 4 && parts[1] == "batch" && parts[2] == "capture" && parts[3] == "start" {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var req batchCaptureStartRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			resp, err := runBatchCaptureStart(labName, req)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		if len(parts) == 4 && parts[1] == "batch" && parts[2] == "capture" && parts[3] == "tasks" {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			resp := listBatchCaptureTasks(labName)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		if len(parts) == 4 && parts[1] == "batch" && parts[2] == "capture" && parts[3] == "stop" {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var req batchCaptureStopRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			resp, err := runBatchCaptureStop(labName, req)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		if len(parts) == 3 && parts[1] == "batch" && parts[2] == "export" {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var req batchExportRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			resp, err := runBatchExport(labName, req)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+
+	mux.HandleFunc("/api/downloads/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		token := strings.TrimPrefix(r.URL.Path, "/api/downloads/")
+		token = strings.TrimSpace(strings.TrimSuffix(token, "/"))
+		if token == "" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		entry, ok := downloadExportByToken(token)
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		defer removeExportToken(token)
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", entry.filename))
+		http.ServeFile(w, r, entry.absPath)
 	})
 
 	// Interactive node terminal (websocket + PTY).

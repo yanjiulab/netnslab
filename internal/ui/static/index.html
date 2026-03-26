@@ -1,158 +1,260 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>netnslab topology UI</title>
-    <link rel="stylesheet" href="/ui/styles.css" />
-    <link rel="stylesheet" href="/ui/ui-vendor/xterm.css" />
-  </head>
-  <body data-theme="light">
-    <header class="topbar">
-      <div class="brand">
-        <img class="brand-icon" src="/ui/icon-netnslab.svg" alt="NETNSLAB" />
-        <span>NETNSLAB</span>
-      </div>
 
-      <div class="controls">
-        <label class="control">
-          Lab:
-          <select id="labSelect"></select>
-        </label>
-        <label class="control">
-          View:
-          <select id="viewModeSelect">
-            <option value="topo">Topology</option>
-            <option value="terminal">Terminal</option>
-          </select>
-        </label>
-        <button id="refreshBtn" class="btn">Refresh</button>
-        <label class="control">
-          <input id="autoRefresh" type="checkbox" checked />
-          Auto refresh
-        </label>
-      </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>netnslab topology UI</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+  <link rel="stylesheet" href="/ui/ui-vendor/xterm.css" />
+</head>
 
-      <div class="meta">
-        <button
-          id="themeToggle"
-          class="btn btn-theme"
-          title="Switch to dark theme"
-          aria-label="Switch to dark theme"
-        >
-          <span id="themeIcon" aria-hidden="true">☾</span>
-        </button>
-        <span id="status">--</span>
-      </div>
-    </header>
+<body data-theme="light">
+  <header class="topbar">
+    <div class="brand">
+      <img class="brand-icon" src="/ui/icon-netnslab.svg" alt="NETNSLAB" />
+      <span>NETNSLAB</span>
+    </div>
 
-    <main class="fixed-layout">
-      <!-- Left: Nodes -->
-      <aside class="panel nodes-pane">
-        <h3>Nodes</h3>
-        <div id="nodesList" class="nodes"></div>
-      </aside>
+    <div class="controls">
+      <label class="control">
+        Lab:
+        <select id="labSelect"></select>
+      </label>
+      <label class="control">
+        View:
+        <select id="viewModeSelect">
+          <option value="topo">Topology</option>
+          <option value="terminal">Terminal</option>
+        </select>
+      </label>
+      <button id="refreshBtn" class="btn">Refresh</button>
+      <button id="batchOpsBtn" class="btn">Batch Ops</button>
+      <label class="control">
+        <input id="autoRefresh" type="checkbox" checked />
+        Auto refresh
+      </label>
+    </div>
 
-      <!-- Center: Topology or Terminal -->
-      <section class="panel center-pane">
-        <div id="topoView" class="center-view">
-          <div class="graph-title">
-            <div class="graph-title-main">
-              Topology
-              <span id="graphHint" class="hint">(Cytoscape layout)</span>
-            </div>
-            <div class="graph-controls">
-              <label class="control">
-                Layout:
-                <select id="layoutSelect">
-                  <option value="cose">cose</option>
-                  <option value="circle">circle</option>
-                  <option value="grid">grid</option>
-                  <option value="concentric">concentric</option>
-                  <option value="breadthfirst">breadthfirst</option>
-                </select>
-              </label>
-              <button id="relayoutBtn" class="btn relayout-action">Relayout</button>
-              <div class="export-actions" aria-label="Export topology">
-                <button
-                  id="exportPngBtn"
-                  class="btn btn-icon btn-export"
-                  title="Export topology as PNG"
-                  aria-label="Export topology as PNG"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M12 3v10"></path>
-                    <path d="M8.5 9.5 12 13l3.5-3.5"></path>
-                    <rect x="4" y="14.5" width="16" height="6" rx="1.8"></rect>
-                  </svg>
-                </button>
-                <button
-                  id="exportSvgBtn"
-                  class="btn btn-icon btn-export"
-                  title="Export topology as SVG"
-                  aria-label="Export topology as SVG"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <rect x="4" y="4.5" width="16" height="15" rx="2"></rect>
-                    <path d="M8 9.5h8"></path>
-                    <path d="M8 13h5"></path>
-                    <path d="M13.5 16.5h2.5"></path>
-                  </svg>
-                </button>
-              </div>
-            </div>
+    <div class="meta">
+      <button id="themeToggle" class="btn btn-theme" title="Switch to dark theme" aria-label="Switch to dark theme">
+        <span id="themeIcon" aria-hidden="true">☾</span>
+      </button>
+      <span id="status">--</span>
+    </div>
+  </header>
+
+  <main class="fixed-layout">
+    <!-- Left: Nodes -->
+    <aside class="panel nodes-pane">
+      <h3>Nodes</h3>
+      <div id="nodesList" class="nodes"></div>
+    </aside>
+
+    <!-- Center: Topology or Terminal -->
+    <section class="panel center-pane">
+      <div id="topoView" class="center-view">
+        <div class="graph-title">
+          <div class="graph-title-main">
+            Topology
+            <span id="graphHint" class="hint">(Cytoscape layout)</span>
           </div>
-          <div id="topologyGraph" class="topology"></div>
-        </div>
-
-        <div id="terminalView" class="center-view hidden">
-          <div class="terminal-tabs-bar">
-            <button id="openHostTerminalBtn" class="btn btn-host-terminal">Host Terminal</button>
-            <label class="control control-compact terminal-theme-control">
-              Theme:
-              <select id="terminalThemeSelect">
-                <option value="auto">Auto</option>
-                <option value="dark">Dark</option>
-                <option value="classic">Classic</option>
-                <option value="ocean">Ocean</option>
-                <option value="solarized">Solarized</option>
+          <div class="graph-controls">
+            <label class="control">
+              Layout:
+              <select id="layoutSelect">
+                <option value="cose">cose</option>
+                <option value="circle">circle</option>
+                <option value="grid">grid</option>
+                <option value="concentric">concentric</option>
+                <option value="breadthfirst">breadthfirst</option>
               </select>
             </label>
-            <div id="terminalTabs" class="terminal-tabs"></div>
-          </div>
-          <div class="terminal-tabs-body" id="terminalTabsBody"></div>
-          <div id="terminalEmpty" class="terminal-empty">
-            Click host button or node terminal icon to open a terminal tab.
+            <button id="relayoutBtn" class="btn relayout-action">Relayout</button>
+            <div class="export-actions" aria-label="Export topology">
+              <button id="exportPngBtn" class="btn btn-icon btn-export" title="Export topology as PNG"
+                aria-label="Export topology as PNG">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 3v10"></path>
+                  <path d="M8.5 9.5 12 13l3.5-3.5"></path>
+                  <rect x="4" y="14.5" width="16" height="6" rx="1.8"></rect>
+                </svg>
+              </button>
+              <button id="exportSvgBtn" class="btn btn-icon btn-export" title="Export topology as SVG"
+                aria-label="Export topology as SVG">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <rect x="4" y="4.5" width="16" height="15" rx="2"></rect>
+                  <path d="M8 9.5h8"></path>
+                  <path d="M8 13h5"></path>
+                  <path d="M13.5 16.5h2.5"></path>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
-      </section>
+        <div id="topologyGraph" class="topology"></div>
+      </div>
 
-      <!-- Right: Details -->
-      <aside class="panel details-pane">
-        <div class="details-head">
-          <h3>Details</h3>
-          <div class="details-controls">
+      <div id="terminalView" class="center-view hidden">
+        <div class="terminal-tabs-bar">
+          <button id="openHostTerminalBtn" class="btn btn-host-terminal">Host Terminal</button>
+          <label class="control control-compact terminal-theme-control">
+            Theme:
+            <select id="terminalThemeSelect">
+              <option value="auto">Auto</option>
+              <option value="dark">Dark</option>
+              <option value="classic">Classic</option>
+              <option value="ocean">Ocean</option>
+              <option value="solarized">Solarized</option>
+            </select>
+          </label>
+          <div id="terminalTabs" class="terminal-tabs"></div>
+        </div>
+        <div class="terminal-tabs-body" id="terminalTabsBody"></div>
+        <div id="terminalEmpty" class="terminal-empty">
+          Click host button or node terminal icon to open a terminal tab.
+        </div>
+      </div>
+    </section>
+
+    <!-- Right: Details -->
+    <aside class="panel details-pane">
+      <div class="details-head">
+        <h3>Details</h3>
+        <div class="details-controls">
+          <label class="control control-compact">
+            <input id="liveToggle" type="checkbox" checked />
+            Live
+          </label>
+          <label class="control control-compact">
+            <input id="diffToggle" type="checkbox" />
+            Diff
+          </label>
+        </div>
+      </div>
+      <div class="details-body">
+        <div id="detailBody" class="detail">Select a node</div>
+      </div>
+    </aside>
+  </main>
+  <div id="edgeFloat" class="edge-float hidden"></div>
+  <div id="batchBackdrop" class="batch-backdrop hidden"></div>
+  <aside id="batchDrawer" class="batch-drawer hidden" aria-hidden="true">
+    <div class="batch-head">
+      <h3>Batch Operations</h3>
+      <button id="batchCloseBtn" class="btn btn-icon" aria-label="Close batch operations">
+        ×
+      </button>
+    </div>
+    <div class="batch-segments" role="tablist" aria-label="Batch action mode">
+      <button id="batchTabExec" class="btn active" role="tab" aria-selected="true">>_ Exec</button>
+      <button id="batchTabCapture" class="btn" role="tab" aria-selected="false">📡 Capture</button>
+      <button id="batchTabExport" class="btn" role="tab" aria-selected="false">📦 Export</button>
+    </div>
+
+    <section class="batch-section">
+      <div class="batch-section-title">1. Select Nodes</div>
+      <div class="batch-selected">
+        <span id="batchSelectedCount">Selected: 0</span>
+        <button id="batchClearBtn" class="btn">Clear</button>
+      </div>
+      <div class="batch-filter">
+        <div class="batch-filter-top">
+          <label class="control batch-field">
+            Node filter:
+            <input id="batchNodeFilter" type="text" placeholder="r[12]|host" />
+          </label>
+          <label class="control control-compact">
+            <input id="batchNodeFilterRegex" type="checkbox" />
+            Regex
+          </label>
+        </div>
+        <div class="batch-filter-bottom">
+          <div id="batchFilterStat" class="batch-filter-stat">Matched: 0</div>
+          <div class="batch-filter-actions">
+            <button id="batchAddMatchedBtn" class="btn">Add Matched</button>
+            <button id="batchOnlyMatchedBtn" class="btn">Only Matched</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="batch-section">
+      <div class="batch-section-title">2. Action</div>
+      <div id="batchExecPane" class="batch-pane">
+        <label class="control batch-field">
+          Command:
+          <input id="batchExecCmd" type="text" placeholder="ip a" />
+        </label>
+        <label class="control batch-field">
+          Timeout(s):
+          <input id="batchExecTimeout" type="number" min="1" value="10" />
+        </label>
+      </div>
+      <div id="batchCapturePane" class="batch-pane hidden">
+        <label class="control batch-field">
+          Interface:
+          <input id="batchCapIface" type="text" placeholder="eth1 or any" />
+        </label>
+        <label class="control batch-field">
+          Filter:
+          <input id="batchCapFilter" type="text" placeholder="icmp and host 10.0.0.1" />
+        </label>
+        <label class="control batch-field">
+          Packet count:
+          <input id="batchCapCount" type="number" min="0" value="0" />
+        </label>
+      </div>
+      <div id="batchExportPane" class="batch-pane hidden">
+        <div class="batch-export-note">Bundle artifacts for offline analysis.</div>
+        <div class="batch-export-group">
+          <div class="batch-export-label">Scope</div>
+          <label class="control control-compact">
+            <input id="batchExportScopeSelected" name="batchExportScope" type="radio" checked />
+            Selected nodes
+          </label>
+          <label class="control control-compact">
+            <input id="batchExportScopeAll" name="batchExportScope" type="radio" />
+            All nodes in lab
+          </label>
+        </div>
+        <div class="batch-export-group">
+          <div class="batch-export-label">Artifacts</div>
+          <div class="batch-export-kinds">
             <label class="control control-compact">
-              <input id="liveToggle" type="checkbox" checked />
-              Live
+              <input id="batchExportKindPcap" type="checkbox" checked />
+              pcap
             </label>
             <label class="control control-compact">
-              <input id="diffToggle" type="checkbox" />
-              Diff
+              <input id="batchExportKindState" type="checkbox" checked />
+              state
+            </label>
+            <label class="control control-compact">
+              <input id="batchExportKindLogs" type="checkbox" />
+              logs
             </label>
           </div>
         </div>
-        <div class="details-body">
-          <div id="detailBody" class="detail">Select a node</div>
-        </div>
-      </aside>
-    </main>
-    <div id="edgeFloat" class="edge-float hidden"></div>
+      </div>
+      <div class="batch-footer">
+        <button id="batchListCaptureBtn" class="btn">List Running</button>
+        <button id="batchStopBtn" class="btn">Stop</button>
+        <button id="batchRunBtn" class="btn" disabled>Run</button>
+      </div>
+    </section>
 
-    <script src="/ui/ui-vendor/cytoscape.min.js"></script>
-    <script src="/ui/ui-vendor/xterm.js"></script>
-    <script src="/ui/ui-vendor/xterm-addon-fit.js"></script>
-    <script src="/ui/app.js"></script>
-  </body>
+    <section class="batch-section batch-section-last batch-section-plain">
+      <div class="batch-section-title">3. Results</div>
+      <div id="batchResult" class="batch-result">
+        Select nodes with Ctrl/Cmd + click in topology or node list.
+      </div>
+    </section>
+  </aside>
+
+  <script src="/ui/ui-vendor/cytoscape.min.js"></script>
+  <script src="/ui/ui-vendor/xterm.js"></script>
+  <script src="/ui/ui-vendor/xterm-addon-fit.js"></script>
+  <script src="/ui/app.js"></script>
+</body>
+
 </html>
-

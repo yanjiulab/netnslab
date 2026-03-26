@@ -17,6 +17,17 @@ const state = {
   terminalFontSize: 13,
   terminalThemePreset: "auto", // auto|dark|classic|ocean|solarized
   theme: "light",
+  batchDrawerOpen: false,
+  batchTab: "exec", // exec|capture|export
+  batchSelectedNodes: new Set(),
+  batchFilterText: "",
+  batchFilterRegex: false,
+  batchExportScope: "selected", // selected|all
+  batchExportKinds: {
+    pcap: true,
+    state: true,
+    logs: false,
+  },
   detailSectionOpen: {
     routes: true,
     iprules: false,
@@ -38,6 +49,19 @@ async function apiGet(url) {
   return res.json();
 }
 
+async function apiPost(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`POST ${url} failed: ${res.status} ${res.statusText} ${txt}`.trim());
+  }
+  return res.json();
+}
+
 function $(id) {
   return document.getElementById(id);
 }
@@ -51,6 +75,330 @@ function updateMainHeightVar() {
 
 function setStatus(text) {
   $("status").textContent = text;
+}
+
+function isBatchToggleEvent(ev) {
+  return !!(ev && (ev.ctrlKey || ev.metaKey));
+}
+
+function unwrapDomEvent(ev) {
+  if (!ev) return null;
+  if (ev.ctrlKey !== undefined || ev.metaKey !== undefined) return ev;
+  if (ev.originalEvent) return unwrapDomEvent(ev.originalEvent);
+  return null;
+}
+
+function shouldBatchToggleFromEvent(evLike) {
+  // When drawer is open, regular click toggles batch selection for faster workflow.
+  if (state.batchDrawerOpen) return true;
+  const domEv = unwrapDomEvent(evLike);
+  return isBatchToggleEvent(domEv);
+}
+
+function toggleBatchNodeSelection(nodeName) {
+  if (!nodeName) return;
+  if (state.batchSelectedNodes.has(nodeName)) state.batchSelectedNodes.delete(nodeName);
+  else state.batchSelectedNodes.add(nodeName);
+}
+
+function clearBatchSelection() {
+  state.batchSelectedNodes.clear();
+}
+
+function setBatchTab(tab) {
+  state.batchTab = tab === "capture" || tab === "export" ? tab : "exec";
+  const execBtn = $("batchTabExec");
+  const capBtn = $("batchTabCapture");
+  const expBtn = $("batchTabExport");
+  const execPane = $("batchExecPane");
+  const capPane = $("batchCapturePane");
+  const expPane = $("batchExportPane");
+  const runBtn = $("batchRunBtn");
+  const stopBtn = $("batchStopBtn");
+  const listBtn = $("batchListCaptureBtn");
+  if (execBtn) execBtn.classList.toggle("active", state.batchTab === "exec");
+  if (capBtn) capBtn.classList.toggle("active", state.batchTab === "capture");
+  if (expBtn) expBtn.classList.toggle("active", state.batchTab === "export");
+  if (execBtn) execBtn.setAttribute("aria-selected", state.batchTab === "exec" ? "true" : "false");
+  if (capBtn) capBtn.setAttribute("aria-selected", state.batchTab === "capture" ? "true" : "false");
+  if (expBtn) expBtn.setAttribute("aria-selected", state.batchTab === "export" ? "true" : "false");
+  if (execPane) execPane.classList.toggle("hidden", state.batchTab !== "exec");
+  if (capPane) capPane.classList.toggle("hidden", state.batchTab !== "capture");
+  if (expPane) expPane.classList.toggle("hidden", state.batchTab !== "export");
+  if (runBtn) {
+    runBtn.textContent =
+      state.batchTab === "capture" ? "Start" : state.batchTab === "export" ? "Export" : "Run";
+  }
+  if (stopBtn) stopBtn.classList.toggle("hidden", state.batchTab !== "capture");
+  if (listBtn) listBtn.classList.toggle("hidden", state.batchTab !== "capture");
+}
+
+function renderBatchSelectionSummary() {
+  const cnt = state.batchSelectedNodes.size;
+  const countEl = $("batchSelectedCount");
+  const runBtn = $("batchRunBtn");
+  const stopBtn = $("batchStopBtn");
+  if (countEl) countEl.textContent = `Selected: ${cnt}`;
+  if (runBtn) runBtn.disabled = cnt === 0;
+  if (stopBtn) stopBtn.disabled = cnt === 0;
+}
+
+function getAllNodeNames() {
+  const nodes = state.topology && state.topology.nodes ? state.topology.nodes : [];
+  return nodes.map((n) => n.name);
+}
+
+function getBatchMatchedNodes() {
+  const names = getAllNodeNames();
+  const q = (state.batchFilterText || "").trim();
+  if (!q) return names;
+  if (!state.batchFilterRegex) {
+    const lq = q.toLowerCase();
+    return names.filter((n) => String(n).toLowerCase().includes(lq));
+  }
+  try {
+    const re = new RegExp(q, "i");
+    return names.filter((n) => re.test(String(n)));
+  } catch (_) {
+    return null;
+  }
+}
+
+function renderBatchFilterStat() {
+  const el = $("batchFilterStat");
+  if (!el) return;
+  const all = getAllNodeNames();
+  const matched = getBatchMatchedNodes();
+  el.classList.remove("error");
+  if (matched === null) {
+    el.textContent = "Regex error";
+    el.classList.add("error");
+    return;
+  }
+  el.textContent = `Matched: ${matched.length} / ${all.length}`;
+}
+
+function renderBatchExecResults(results) {
+  const host = $("batchResult");
+  if (!host) return;
+  if (!Array.isArray(results) || !results.length) {
+    host.textContent = "No result";
+    return;
+  }
+  host.innerHTML = results
+    .map((r) => {
+      const node = escapeHtml(r.node || "-");
+      const exitCode = Number.isFinite(r.exit_code) ? r.exit_code : -1;
+      const stdoutTail = escapeHtml(r.stdout_tail || "");
+      const stderrTail = escapeHtml(r.stderr_tail || "");
+      const dur = Number.isFinite(r.duration_ms) ? r.duration_ms : 0;
+      return `
+        <div class="batch-result-item">
+          <div><strong>${node}</strong> exit=${exitCode} ${dur}ms</div>
+          ${stdoutTail ? `<pre>stdout:\n${stdoutTail}</pre>` : ""}
+          ${stderrTail ? `<pre>stderr:\n${stderrTail}</pre>` : ""}
+        </div>
+      `;
+    })
+    .join("");
+}
+
+async function runBatchExec() {
+  const cmdInput = $("batchExecCmd");
+  const timeoutInput = $("batchExecTimeout");
+  const resultEl = $("batchResult");
+  const nodes = Array.from(state.batchSelectedNodes);
+  const command = cmdInput ? String(cmdInput.value || "").trim() : "";
+  let timeoutSec = timeoutInput ? Number(timeoutInput.value || 10) : 10;
+  if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) timeoutSec = 10;
+
+  if (!nodes.length) {
+    setStatus("No nodes selected");
+    return;
+  }
+  if (!command) {
+    setStatus("Command is required");
+    return;
+  }
+  if (resultEl) resultEl.textContent = "Running...";
+  try {
+    const data = await apiPost(`/api/labs/${encodeURIComponent(state.lab)}/batch/exec`, {
+      nodes: nodes,
+      command: command,
+      timeout_sec: timeoutSec,
+      parallelism: 4,
+    });
+    renderBatchExecResults(data.results || []);
+    setStatus("Batch exec finished");
+  } catch (err) {
+    if (resultEl) resultEl.textContent = String(err && err.message ? err.message : err);
+    setStatus("Batch exec failed");
+  } finally {
+    renderBatchSelectionSummary();
+  }
+}
+
+function renderBatchCaptureResults(results) {
+  const host = $("batchResult");
+  if (!host) return;
+  if (!Array.isArray(results) || !results.length) {
+    host.textContent = "No result";
+    return;
+  }
+  host.innerHTML = results
+    .map((r) => {
+      const node = escapeHtml(r.node || "-");
+      const status = escapeHtml(r.status || "-");
+      const msg = escapeHtml(r.message || "");
+      const pcapPath = escapeHtml(r.pcap_path || "");
+      return `
+        <div class="batch-result-item">
+          <div><strong>${node}</strong> status=${status}</div>
+          ${pcapPath ? `<div>pcap: <code>${pcapPath}</code></div>` : ""}
+          ${msg ? `<div>${msg}</div>` : ""}
+        </div>
+      `;
+    })
+    .join("");
+}
+
+async function runBatchCaptureStart() {
+  const ifaceInput = $("batchCapIface");
+  const filterInput = $("batchCapFilter");
+  const countInput = $("batchCapCount");
+  const resultEl = $("batchResult");
+  const nodes = Array.from(state.batchSelectedNodes);
+  const ifname = ifaceInput ? String(ifaceInput.value || "").trim() : "";
+  const filter = filterInput ? String(filterInput.value || "").trim() : "";
+  let packetCount = countInput ? Number(countInput.value || 0) : 0;
+  if (!Number.isFinite(packetCount) || packetCount < 0) packetCount = 0;
+  if (!nodes.length) {
+    setStatus("No nodes selected");
+    return;
+  }
+  if (resultEl) resultEl.textContent = "Starting captures...";
+  try {
+    const data = await apiPost(`/api/labs/${encodeURIComponent(state.lab)}/batch/capture/start`, {
+      nodes: nodes,
+      ifname: ifname,
+      filter: filter,
+      packet_count: packetCount,
+    });
+    renderBatchCaptureResults(data.results || []);
+    setStatus("Batch capture started");
+    await listRunningBatchCaptures();
+  } catch (err) {
+    if (resultEl) resultEl.textContent = String(err && err.message ? err.message : err);
+    setStatus("Batch capture start failed");
+  }
+}
+
+async function runBatchCaptureStop() {
+  const resultEl = $("batchResult");
+  const nodes = Array.from(state.batchSelectedNodes);
+  if (!nodes.length) {
+    setStatus("No nodes selected");
+    return;
+  }
+  if (resultEl) resultEl.textContent = "Stopping captures...";
+  try {
+    const data = await apiPost(`/api/labs/${encodeURIComponent(state.lab)}/batch/capture/stop`, {
+      nodes: nodes,
+    });
+    renderBatchCaptureResults(data.results || []);
+    setStatus("Batch capture stopped");
+  } catch (err) {
+    if (resultEl) resultEl.textContent = String(err && err.message ? err.message : err);
+    setStatus("Batch capture stop failed");
+  }
+}
+
+function buildExportPreview() {
+  const selectedCnt = state.batchSelectedNodes.size;
+  const scope = state.batchExportScope === "all" ? "all nodes in lab" : `${selectedCnt} selected nodes`;
+  const kinds = Object.keys(state.batchExportKinds).filter((k) => !!state.batchExportKinds[k]);
+  return {
+    scope,
+    kinds,
+  };
+}
+
+async function runBatchExport() {
+  const resultEl = $("batchResult");
+  const p = buildExportPreview();
+  if (!p.kinds.length) {
+    setStatus("Choose at least one artifact");
+    if (resultEl) resultEl.textContent = "No artifacts selected for export.";
+    return;
+  }
+  if (resultEl) resultEl.textContent = "Preparing artifact bundle...";
+  try {
+    const data = await apiPost(`/api/labs/${encodeURIComponent(state.lab)}/batch/export`, {
+      scope: state.batchExportScope,
+      nodes: Array.from(state.batchSelectedNodes),
+      kinds: p.kinds,
+    });
+    if (resultEl) {
+      resultEl.innerHTML = `
+        <div class="batch-result-item">
+          <div><strong>Export ready</strong></div>
+          <div>File: ${escapeHtml(data.filename || "-")}</div>
+          <div>Items: ${escapeHtml(String(data.file_count || 0))}</div>
+          <div>Size: ${escapeHtml(String(data.size_bytes || 0))} bytes</div>
+        </div>
+      `;
+    }
+    const dl = data.download_url;
+    if (dl) {
+      const a = document.createElement("a");
+      a.href = dl;
+      a.download = data.filename || "";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    setStatus("Artifacts exported");
+  } catch (err) {
+    if (resultEl) resultEl.textContent = String(err && err.message ? err.message : err);
+    setStatus("Export failed");
+  }
+}
+
+async function listRunningBatchCaptures() {
+  const resultEl = $("batchResult");
+  if (resultEl) resultEl.textContent = "Loading running capture tasks...";
+  try {
+    const data = await apiGet(`/api/labs/${encodeURIComponent(state.lab)}/batch/capture/tasks`);
+    renderBatchCaptureResults(data.results || []);
+    setStatus("Capture task list updated");
+  } catch (err) {
+    if (resultEl) resultEl.textContent = String(err && err.message ? err.message : err);
+    setStatus("Capture task list failed");
+  }
+}
+
+function openBatchDrawer() {
+  state.batchDrawerOpen = true;
+  const drawer = $("batchDrawer");
+  const backdrop = $("batchBackdrop");
+  if (drawer) {
+    drawer.classList.remove("hidden");
+    drawer.setAttribute("aria-hidden", "false");
+  }
+  if (backdrop) backdrop.classList.remove("hidden");
+  renderBatchSelectionSummary();
+  renderBatchFilterStat();
+}
+
+function closeBatchDrawer() {
+  state.batchDrawerOpen = false;
+  const drawer = $("batchDrawer");
+  const backdrop = $("batchBackdrop");
+  if (drawer) {
+    drawer.classList.add("hidden");
+    drawer.setAttribute("aria-hidden", "true");
+  }
+  if (backdrop) backdrop.classList.add("hidden");
 }
 
 function edgeFloatEl() {
@@ -129,7 +477,7 @@ function updateCyThemeStyles() {
       .style("color", p.edgeText)
       .style("text-background-color", p.edgeTextBg)
       .update();
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function getTerminalTheme(theme, preset) {
@@ -231,7 +579,7 @@ function applyTerminalTheme() {
     if (!t || !t.term) return;
     try {
       t.term.options.theme = termTheme;
-    } catch (_) {}
+    } catch (_) { }
   });
 }
 
@@ -241,7 +589,7 @@ function loadInitialTerminalThemePreset() {
   try {
     const saved = localStorage.getItem("netnslab.terminalThemePreset");
     if (saved && allowed.has(saved)) preset = saved;
-  } catch (_) {}
+  } catch (_) { }
   state.terminalThemePreset = preset;
   const sel = $("terminalThemeSelect");
   if (sel) sel.value = preset;
@@ -264,7 +612,7 @@ function setTheme(theme) {
   }
   try {
     localStorage.setItem("netnslab.theme", finalTheme);
-  } catch (_) {}
+  } catch (_) { }
   updateCyThemeStyles();
   applyTerminalTheme();
 }
@@ -274,7 +622,7 @@ function loadInitialTheme() {
   try {
     const saved = localStorage.getItem("netnslab.theme");
     if (saved === "light" || saved === "dark") t = saved;
-  } catch (_) {}
+  } catch (_) { }
   setTheme(t);
 }
 
@@ -353,6 +701,16 @@ function ensureCy() {
         },
       },
       {
+        selector: "node.batch-selected",
+        style: {
+          "border-width": 3,
+          "border-color": "rgba(79,140,255,0.88)",
+          "overlay-color": "rgba(79,140,255,0.08)",
+          "overlay-padding": 3,
+          "overlay-opacity": 1,
+        },
+      },
+      {
         selector: "node.pinned",
         style: {
           "border-style": "double",
@@ -390,6 +748,13 @@ function ensureCy() {
     const ele = evt.target;
     const name = ele.data("name");
     if (!name) return;
+    if (shouldBatchToggleFromEvent(evt)) {
+      toggleBatchNodeSelection(name);
+      highlightSelection();
+      renderNodes();
+      renderBatchSelectionSummary();
+      return;
+    }
     state.selectedNode = name;
     state.selectedEdgeId = "";
     hideEdgeFloat();
@@ -410,16 +775,16 @@ function ensureCy() {
     const full =
       edge.data("fullLabel") ||
       `${edge.data("ifA")}<->${edge.data("ifB")}` +
-        (edge.data("netem") && edge.data("netem") !== "-"
-          ? `\nnetem: ${edge.data("netem")}`
-          : "");
+      (edge.data("netem") && edge.data("netem") !== "-"
+        ? `\nnetem: ${edge.data("netem")}`
+        : "");
 
     if (state.selectedEdgeId === id) {
       state.selectedEdgeId = "";
       hideEdgeFloat();
       try {
         edge.unselect();
-      } catch (_) {}
+      } catch (_) { }
       return;
     }
 
@@ -589,13 +954,19 @@ function syncGraph() {
 function highlightSelection() {
   const cy = ensureCy();
   cy.elements().removeClass("selected");
-  if (!state.selectedNode) return;
-  const nodeId = makeNodeId(state.selectedNode);
-  const n = cy.getElementById(nodeId);
-  if (n.nonempty()) {
-    n.addClass("selected");
-    n.connectedEdges().addClass("selected");
+  cy.nodes().removeClass("batch-selected");
+  if (state.selectedNode) {
+    const nodeId = makeNodeId(state.selectedNode);
+    const n = cy.getElementById(nodeId);
+    if (n.nonempty()) {
+      n.addClass("selected");
+      n.connectedEdges().addClass("selected");
+    }
   }
+  state.batchSelectedNodes.forEach((name) => {
+    const n = cy.getElementById(makeNodeId(name));
+    if (n && n.nonempty()) n.addClass("batch-selected");
+  });
 }
 
 function renderNodes() {
@@ -610,9 +981,17 @@ function renderNodes() {
     const btn = document.createElement("button");
     btn.className = "node-item node-main";
     if (n.name === state.selectedNode) btn.classList.add("active");
+    if (state.batchSelectedNodes.has(n.name)) btn.classList.add("batch-selected");
     btn.onclick = async (ev) => {
       // Immediate single-click feedback; ignore the second click in a double-click.
       if (ev && ev.detail > 1) return;
+      if (shouldBatchToggleFromEvent(ev)) {
+        toggleBatchNodeSelection(n.name);
+        highlightSelection();
+        renderNodes();
+        renderBatchSelectionSummary();
+        return;
+      }
       state.selectedNode = n.name;
       highlightSelection();
       renderNodes();
@@ -685,53 +1064,53 @@ function renderDetail() {
   const routes = Array.isArray(n.routes) ? n.routes : [];
   const routeLines = routes.length
     ? routes.map((r) => {
-        const isDefault = r.startsWith("default ");
-        const metricMatch = r.match(/\bmetric\s+(\d+)/);
-        const parts = [];
-        if (metricMatch && metricMatch[1]) parts.push(`metric=${metricMatch[1]}`);
-        const suffix = parts.length ? `  [${parts.join(", ")}]` : "";
-        return `${isDefault ? "* " : "  "}${r}${suffix}`;
-      })
+      const isDefault = r.startsWith("default ");
+      const metricMatch = r.match(/\bmetric\s+(\d+)/);
+      const parts = [];
+      if (metricMatch && metricMatch[1]) parts.push(`metric=${metricMatch[1]}`);
+      const suffix = parts.length ? `  [${parts.join(", ")}]` : "";
+      return `${isDefault ? "* " : "  "}${r}${suffix}`;
+    })
     : [];
   const ipRules = Array.isArray(n.ip_rules) ? n.ip_rules : [];
   const ifaces = n.ifaces || [];
   const ifaceSigCurr = {};
   const ifaceLines = ifaces.length
     ? ifaces
-        .map((i) => {
-          const stateStr = state.live ? (i.up ? "UP" : "DOWN") : "-";
-          const oper = state.live && i.operstate ? ` (${i.operstate})` : "";
-          const hasStats = i.rx_packets !== undefined || i.tx_packets !== undefined;
-          const rxPackets = i.rx_packets !== undefined ? i.rx_packets : 0;
-          const rxBytes = i.rx_bytes !== undefined ? i.rx_bytes : 0;
-          const rxDropped = i.rx_dropped !== undefined ? i.rx_dropped : 0;
-          const rxErrors = i.rx_errors !== undefined ? i.rx_errors : 0;
-          const txPackets = i.tx_packets !== undefined ? i.tx_packets : 0;
-          const txBytes = i.tx_bytes !== undefined ? i.tx_bytes : 0;
-          const txDropped = i.tx_dropped !== undefined ? i.tx_dropped : 0;
-          const txErrors = i.tx_errors !== undefined ? i.tx_errors : 0;
-          const ipv6 = Array.isArray(i.ipv6) ? i.ipv6 : [];
+      .map((i) => {
+        const stateStr = state.live ? (i.up ? "UP" : "DOWN") : "-";
+        const oper = state.live && i.operstate ? ` (${i.operstate})` : "";
+        const hasStats = i.rx_packets !== undefined || i.tx_packets !== undefined;
+        const rxPackets = i.rx_packets !== undefined ? i.rx_packets : 0;
+        const rxBytes = i.rx_bytes !== undefined ? i.rx_bytes : 0;
+        const rxDropped = i.rx_dropped !== undefined ? i.rx_dropped : 0;
+        const rxErrors = i.rx_errors !== undefined ? i.rx_errors : 0;
+        const txPackets = i.tx_packets !== undefined ? i.tx_packets : 0;
+        const txBytes = i.tx_bytes !== undefined ? i.tx_bytes : 0;
+        const txDropped = i.tx_dropped !== undefined ? i.tx_dropped : 0;
+        const txErrors = i.tx_errors !== undefined ? i.tx_errors : 0;
+        const ipv6 = Array.isArray(i.ipv6) ? i.ipv6 : [];
 
-          const line1 = `${i.ifname}  [${stateStr}]${oper}  ip=${i.ipv4 || "-"}`;
-          const line2 = `ipv6=${ipv6.length ? ipv6.join(", ") : "-"}`;
-          const line3 = `mac=${i.mac || "-"}  mtu=${i.mtu || "-"}`;
-          const line4 = `rx: pkt=${rxPackets} bytes=${rxBytes} drop=${rxDropped} err=${rxErrors}`;
-          const line5 = `tx: pkt=${txPackets} bytes=${txBytes} drop=${txDropped} err=${txErrors}`;
-          const line6 = hasStats ? "" : "stats: missing";
+        const line1 = `${i.ifname}  [${stateStr}]${oper}  ip=${i.ipv4 || "-"}`;
+        const line2 = `ipv6=${ipv6.length ? ipv6.join(", ") : "-"}`;
+        const line3 = `mac=${i.mac || "-"}  mtu=${i.mtu || "-"}`;
+        const line4 = `rx: pkt=${rxPackets} bytes=${rxBytes} drop=${rxDropped} err=${rxErrors}`;
+        const line5 = `tx: pkt=${txPackets} bytes=${txBytes} drop=${txDropped} err=${txErrors}`;
+        const line6 = hasStats ? "" : "stats: missing";
 
-          const sig = [line1, line2, line3, line4, line5, line6].filter(Boolean).join("|");
-          ifaceSigCurr[i.ifname] = sig;
-          const changed =
-            diffEnabled &&
-            prevSnapshot.ifaceSig &&
-            prevSnapshot.ifaceSig[i.ifname] !== undefined &&
-            prevSnapshot.ifaceSig[i.ifname] !== sig;
+        const sig = [line1, line2, line3, line4, line5, line6].filter(Boolean).join("|");
+        ifaceSigCurr[i.ifname] = sig;
+        const changed =
+          diffEnabled &&
+          prevSnapshot.ifaceSig &&
+          prevSnapshot.ifaceSig[i.ifname] !== undefined &&
+          prevSnapshot.ifaceSig[i.ifname] !== sig;
 
-          const key = `${n.name}:${i.ifname}`;
-          const keyAttr = encodeURIComponent(key);
-          const ifaceOpen = !!state.ifaceDetailOpen[key];
-          const detail = [line2, line3, line4, line5, line6].filter(Boolean).join("\n");
-          return `
+        const key = `${n.name}:${i.ifname}`;
+        const keyAttr = encodeURIComponent(key);
+        const ifaceOpen = !!state.ifaceDetailOpen[key];
+        const detail = [line2, line3, line4, line5, line6].filter(Boolean).join("\n");
+        return `
             <div class="iface-item">
               <div class="iface-main ${changed ? "diff-line-bg" : ""}">
                 <button class="fold-btn fold-btn-iface" type="button" data-fold-iface="${keyAttr}">${ifaceOpen ? "−" : "+"}</button>
@@ -740,8 +1119,8 @@ function renderDetail() {
               <pre class="iface-extra ${ifaceOpen ? "" : "hidden"}">${escapeHtml(detail)}</pre>
             </div>
           `;
-        })
-        .join("")
+      })
+      .join("")
     : "";
   const neigh = Array.isArray(n.neigh) ? n.neigh : [];
   const fdb = Array.isArray(n.fdb) ? n.fdb : [];
@@ -903,7 +1282,7 @@ function setCenterMode(mode) {
           state.cy.resize();
           runLayout(false);
         }
-      } catch (_) {}
+      } catch (_) { }
     });
   } else {
     // Ensure active terminal is visible & properly sized.
@@ -973,7 +1352,7 @@ function applyTerminalFontSize() {
       t.term.options.fontSize = size;
       if (t.fit) t.fit.fit();
       terminalSendResizeForSession(sid);
-    } catch (_) {}
+    } catch (_) { }
   });
 }
 
@@ -1012,7 +1391,7 @@ function selectTerminalTab(sessionId) {
     if (tab && tab.fit) tab.fit.fit();
     terminalSendResizeForSession(sessionId);
     if (tab && tab.term) tab.term.focus();
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function closeTerminalForSession(sessionId) {
@@ -1024,13 +1403,13 @@ function closeTerminalForSession(sessionId) {
 
   try {
     if (tab.ws) tab.ws.close();
-  } catch (_) {}
+  } catch (_) { }
   try {
     if (tab.ro) tab.ro.disconnect();
-  } catch (_) {}
+  } catch (_) { }
   try {
     if (tab.term) tab.term.dispose();
-  } catch (_) {}
+  } catch (_) { }
 
   if (tab.tabEl && tab.tabEl.parentNode) tab.tabEl.parentNode.removeChild(tab.tabEl);
   if (tab.hostEl && tab.hostEl.parentNode) tab.hostEl.parentNode.removeChild(tab.hostEl);
@@ -1153,7 +1532,7 @@ async function openTerminalForNode(nodeName) {
     try {
       fit.fit();
       terminalSendResizeForSession(sessionId);
-    } catch (_) {}
+    } catch (_) { }
     term.focus();
   };
 
@@ -1203,7 +1582,7 @@ async function openTerminalForNode(nodeName) {
     try {
       fit.fit();
       terminalSendResizeForSession(sessionId);
-    } catch (_) {}
+    } catch (_) { }
   });
   tab.ro.observe(hostEl);
 
@@ -1299,7 +1678,7 @@ function openHostTerminal() {
     try {
       fit.fit();
       terminalSendResizeForSession(sessionId);
-    } catch (_) {}
+    } catch (_) { }
     term.focus();
   };
 
@@ -1346,7 +1725,7 @@ function openHostTerminal() {
     try {
       fit.fit();
       terminalSendResizeForSession(sessionId);
-    } catch (_) {}
+    } catch (_) { }
   });
   tab.ro.observe(hostEl);
 
@@ -1400,11 +1779,11 @@ async function loadTopology(forceNodeName, options) {
     forceNodeName !== undefined
       ? forceNodeName
       : state.selectedNode ||
-        ((state.topology &&
-          state.topology.nodes &&
-          state.topology.nodes[0] &&
-          state.topology.nodes[0].name) ||
-          "");
+      ((state.topology &&
+        state.topology.nodes &&
+        state.topology.nodes[0] &&
+        state.topology.nodes[0].name) ||
+        "");
 
   if (state.live && !hadNodeParam && state.selectedNode) {
     return loadTopology(state.selectedNode, opts);
@@ -1428,9 +1807,10 @@ async function loadTopology(forceNodeName, options) {
     requestAnimationFrame(() => {
       try {
         if (state.cy) state.cy.resize();
-      } catch (_) {}
+      } catch (_) { }
     });
   }
+  renderBatchFilterStat();
 }
 
 function exportTopologyPng() {
@@ -1596,7 +1976,7 @@ function setupEvents() {
       state.terminalThemePreset = v;
       try {
         localStorage.setItem("netnslab.terminalThemePreset", v);
-      } catch (_) {}
+      } catch (_) { }
       applyTerminalTheme();
     };
   }
@@ -1607,6 +1987,141 @@ function setupEvents() {
       openHostTerminal();
     };
   }
+  const batchOpsBtn = $("batchOpsBtn");
+  if (batchOpsBtn) batchOpsBtn.onclick = () => openBatchDrawer();
+  const batchCloseBtn = $("batchCloseBtn");
+  if (batchCloseBtn) batchCloseBtn.onclick = () => closeBatchDrawer();
+  const batchBackdrop = $("batchBackdrop");
+  if (batchBackdrop) batchBackdrop.onclick = () => closeBatchDrawer();
+  const batchClearBtn = $("batchClearBtn");
+  if (batchClearBtn) {
+    batchClearBtn.onclick = () => {
+      clearBatchSelection();
+      highlightSelection();
+      renderNodes();
+      renderBatchSelectionSummary();
+    };
+  }
+  const batchTabExec = $("batchTabExec");
+  if (batchTabExec) batchTabExec.onclick = () => setBatchTab("exec");
+  const batchTabCapture = $("batchTabCapture");
+  if (batchTabCapture) {
+    batchTabCapture.onclick = async () => {
+      setBatchTab("capture");
+      await listRunningBatchCaptures();
+    };
+  }
+  const batchTabExport = $("batchTabExport");
+  if (batchTabExport) {
+    batchTabExport.onclick = () => {
+      setBatchTab("export");
+    };
+  }
+  const batchRunBtn = $("batchRunBtn");
+  if (batchRunBtn) {
+    batchRunBtn.onclick = async () => {
+      if (state.batchTab === "export") {
+        await runBatchExport();
+        return;
+      }
+      if (state.batchTab === "capture") {
+        await runBatchCaptureStart();
+        return;
+      }
+      await runBatchExec();
+    };
+  }
+  const batchStopBtn = $("batchStopBtn");
+  if (batchStopBtn) {
+    batchStopBtn.onclick = async () => {
+      if (state.batchTab !== "capture") return;
+      await runBatchCaptureStop();
+      await listRunningBatchCaptures();
+    };
+  }
+  const batchListCaptureBtn = $("batchListCaptureBtn");
+  if (batchListCaptureBtn) {
+    batchListCaptureBtn.onclick = async () => {
+      await listRunningBatchCaptures();
+    };
+  }
+  const exportScopeSelected = $("batchExportScopeSelected");
+  if (exportScopeSelected) {
+    exportScopeSelected.onchange = (e) => {
+      if (e.target.checked) state.batchExportScope = "selected";
+    };
+  }
+  const exportScopeAll = $("batchExportScopeAll");
+  if (exportScopeAll) {
+    exportScopeAll.onchange = (e) => {
+      if (e.target.checked) state.batchExportScope = "all";
+    };
+  }
+  const exportKindPcap = $("batchExportKindPcap");
+  if (exportKindPcap) {
+    exportKindPcap.onchange = (e) => {
+      state.batchExportKinds.pcap = !!e.target.checked;
+    };
+  }
+  const exportKindState = $("batchExportKindState");
+  if (exportKindState) {
+    exportKindState.onchange = (e) => {
+      state.batchExportKinds.state = !!e.target.checked;
+    };
+  }
+  const exportKindLogs = $("batchExportKindLogs");
+  if (exportKindLogs) {
+    exportKindLogs.onchange = (e) => {
+      state.batchExportKinds.logs = !!e.target.checked;
+    };
+  }
+  const batchNodeFilter = $("batchNodeFilter");
+  if (batchNodeFilter) {
+    batchNodeFilter.oninput = (e) => {
+      state.batchFilterText = String(e.target.value || "");
+      renderBatchFilterStat();
+    };
+  }
+  const batchNodeFilterRegex = $("batchNodeFilterRegex");
+  if (batchNodeFilterRegex) {
+    batchNodeFilterRegex.onchange = (e) => {
+      state.batchFilterRegex = !!e.target.checked;
+      renderBatchFilterStat();
+    };
+  }
+  const batchAddMatchedBtn = $("batchAddMatchedBtn");
+  if (batchAddMatchedBtn) {
+    batchAddMatchedBtn.onclick = () => {
+      const matched = getBatchMatchedNodes();
+      if (matched === null) {
+        renderBatchFilterStat();
+        return;
+      }
+      matched.forEach((n) => state.batchSelectedNodes.add(n));
+      highlightSelection();
+      renderNodes();
+      renderBatchSelectionSummary();
+      renderBatchFilterStat();
+    };
+  }
+  const batchOnlyMatchedBtn = $("batchOnlyMatchedBtn");
+  if (batchOnlyMatchedBtn) {
+    batchOnlyMatchedBtn.onclick = () => {
+      const matched = getBatchMatchedNodes();
+      if (matched === null) {
+        renderBatchFilterStat();
+        return;
+      }
+      state.batchSelectedNodes = new Set(matched);
+      highlightSelection();
+      renderNodes();
+      renderBatchSelectionSummary();
+      renderBatchFilterStat();
+    };
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && state.batchDrawerOpen) closeBatchDrawer();
+  });
 }
 
 async function init() {
@@ -1618,13 +2133,16 @@ async function init() {
     if (state.centerMode === "topo") {
       try {
         if (state.cy) state.cy.resize();
-      } catch (_) {}
+      } catch (_) { }
     } else if (state.terminalActiveNode) {
       terminalSendResizeForSession(state.terminalActiveNode);
     }
   });
 
   setupEvents();
+  setBatchTab(state.batchTab);
+  renderBatchSelectionSummary();
+  renderBatchFilterStat();
   ensureCy();
   const ls = $("layoutSelect");
   if (ls) state.layoutName = ls.value || "cose";
