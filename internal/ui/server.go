@@ -29,12 +29,15 @@ type uiNode struct {
 	Ifaces  []uiIface `json:"ifaces,omitempty"`
 	HasMgmt bool      `json:"has_mgmt"`
 	Routes  []string  `json:"routes,omitempty"`
+	IPRules []string  `json:"ip_rules,omitempty"`
 	Neigh   []string  `json:"neigh,omitempty"`
+	FDB     []string  `json:"fdb,omitempty"`
 }
 
 type uiIface struct {
 	IfName    string `json:"ifname"`
 	IPv4      string `json:"ipv4"`
+	IPv6      []string `json:"ipv6,omitempty"`
 	Mac       string `json:"mac,omitempty"`
 	MTU       int    `json:"mtu,omitempty"`
 	RxPackets uint64 `json:"rx_packets,omitempty"`
@@ -229,6 +232,7 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 
 	// Cache interface queries to avoid duplicated ip/netns exec calls.
 	ipByNodeIf := make(map[string]map[string]string)
+	ipv6ByNodeIf := make(map[string]map[string][]string)
 	upByNodeIf := make(map[string]map[string]bool)
 	operByNodeIf := make(map[string]map[string]string)
 	tcByNodeIf := make(map[string]map[string]string) // only for selectedNode
@@ -237,6 +241,9 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 	for _, nodeName := range nodeNames {
 		if ipByNodeIf[nodeName] == nil {
 			ipByNodeIf[nodeName] = make(map[string]string)
+		}
+		if ipv6ByNodeIf[nodeName] == nil {
+			ipv6ByNodeIf[nodeName] = make(map[string][]string)
 		}
 		if live {
 			if upByNodeIf[nodeName] == nil {
@@ -253,7 +260,31 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 
 		for ifName := range ifacesByNode[nodeName] {
 			ipByNodeIf[nodeName][ifName] = netns.QueryIfaceIPv4(labName, nodeName, ifName)
+			ipv6ByNodeIf[nodeName][ifName] = netns.QueryIfaceIPv6(labName, nodeName, ifName)
 			if live {
+				up, oper := netns.QueryIfaceUp(labName, nodeName, ifName)
+				upByNodeIf[nodeName][ifName] = up
+				operByNodeIf[nodeName][ifName] = oper
+				if needSelectedLive && nodeName == selectedNode {
+					tcByNodeIf[nodeName][ifName] = netns.QueryTcQdisc(labName, nodeName, ifName)
+					metaByNodeIf[nodeName][ifName] = netns.QueryIfaceMeta(labName, nodeName, ifName)
+				}
+			}
+		}
+		// Include runtime-created interfaces when live mode is enabled.
+		// This lets Details reflect interfaces added manually inside netns.
+		if live {
+			for _, ifName := range netns.QueryIfaceNames(labName, nodeName) {
+				if ifName == "" {
+					continue
+				}
+				ifacesByNode[nodeName] = ensureIfaceSet(ifacesByNode[nodeName], ifName)
+				if _, ok := ipByNodeIf[nodeName][ifName]; !ok {
+					ipByNodeIf[nodeName][ifName] = netns.QueryIfaceIPv4(labName, nodeName, ifName)
+				}
+				if _, ok := ipv6ByNodeIf[nodeName][ifName]; !ok {
+					ipv6ByNodeIf[nodeName][ifName] = netns.QueryIfaceIPv6(labName, nodeName, ifName)
+				}
 				up, oper := netns.QueryIfaceUp(labName, nodeName, ifName)
 				upByNodeIf[nodeName][ifName] = up
 				operByNodeIf[nodeName][ifName] = oper
@@ -266,10 +297,14 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 	}
 
 	var routesSelected []string
+	var ipRulesSelected []string
 	var neighSelected []string
+	var fdbSelected []string
 	if needSelectedLive {
 		routesSelected = netns.QueryRoutes(labName, selectedNode)
+		ipRulesSelected = netns.QueryIPRules(labName, selectedNode)
 		neighSelected = netns.QueryNeighbors(labName, selectedNode)
+		fdbSelected = netns.QueryFDB(labName, selectedNode)
 	}
 
 	for _, nodeName := range nodeNames {
@@ -281,6 +316,7 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 			ui := uiIface{
 				IfName: ifName,
 				IPv4:   ip,
+				IPv6:   ipv6ByNodeIf[nodeName][ifName],
 				Up:     false,
 			}
 			if live {
@@ -324,9 +360,21 @@ func buildTopology(labName string, live bool, selectedNode string) (*uiTopology,
 				}
 				return nil
 			}(),
+			IPRules: func() []string {
+				if needSelectedLive && nodeName == selectedNode {
+					return ipRulesSelected
+				}
+				return nil
+			}(),
 			Neigh: func() []string {
 				if needSelectedLive && nodeName == selectedNode {
 					return neighSelected
+				}
+				return nil
+			}(),
+			FDB: func() []string {
+				if needSelectedLive && nodeName == selectedNode {
+					return fdbSelected
 				}
 				return nil
 			}(),

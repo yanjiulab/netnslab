@@ -14,6 +14,17 @@ const state = {
   terminalTabOrder: [], // ordered list of sessionIds
   terminalActiveNode: "", // actually stores active sessionId in terminal mode
   terminalSessionSeq: 0,
+  theme: "light",
+  detailSectionOpen: {
+    routes: true,
+    iprules: false,
+    ifaces: true,
+    neigh: false,
+    fdb: false,
+    tc: false,
+  },
+  ifaceDetailOpen: {}, // key: `${node}:${ifname}` -> bool
+  detailPrevByNode: {}, // node -> previous detail snapshot for diff
 };
 
 async function apiGet(url) {
@@ -78,6 +89,70 @@ function escapeHtml(s) {
 function getLiveEnabled() {
   const el = $("liveToggle");
   return el ? !!el.checked : true;
+}
+
+function getThemePalette(theme) {
+  if (theme === "dark") {
+    return {
+      edge: "rgba(200,200,200,0.35)",
+      edgeText: "rgba(232,238,252,0.85)",
+      edgeTextBg: "#121a2b",
+      nodeText: "#071020",
+    };
+  }
+  return {
+    edge: "rgba(25,35,52,0.34)",
+    edgeText: "rgba(22,32,51,0.9)",
+    edgeTextBg: "#ffffff",
+    nodeText: "#071020",
+  };
+}
+
+function updateCyThemeStyles() {
+  if (!state.cy) return;
+  const p = getThemePalette(state.theme);
+  try {
+    state.cy.style()
+      .selector("node")
+      .style("color", p.nodeText)
+      .update();
+    state.cy.style()
+      .selector("edge")
+      .style("line-color", p.edge)
+      .style("color", p.edgeText)
+      .style("text-background-color", p.edgeTextBg)
+      .update();
+  } catch (_) {}
+}
+
+function setTheme(theme) {
+  const finalTheme = theme === "dark" ? "dark" : "light";
+  state.theme = finalTheme;
+  document.body.setAttribute("data-theme", finalTheme);
+  const toggle = $("themeToggle");
+  const icon = $("themeIcon");
+  if (toggle) {
+    const toTheme = finalTheme === "dark" ? "light" : "dark";
+    const label = `Switch to ${toTheme} theme`;
+    toggle.title = label;
+    toggle.setAttribute("aria-label", label);
+  }
+  if (icon) {
+    icon.textContent = finalTheme === "dark" ? "☀" : "☾";
+  }
+  try {
+    localStorage.setItem("netnslab.theme", finalTheme);
+  } catch (_) {}
+  updateCyThemeStyles();
+}
+
+function loadInitialTheme() {
+  let t = "light";
+  try {
+    const saved = localStorage.getItem("netnslab.theme");
+    if (saved === "light" || saved === "dark") t = saved;
+  } catch (_) {}
+  setTheme(t);
 }
 
 function nodeLabel(node) {
@@ -272,6 +347,8 @@ function ensureCy() {
     }
   });
 
+  updateCyThemeStyles();
+
   return state.cy;
 }
 
@@ -410,10 +487,15 @@ function renderNodes() {
   const nodes =
     state.topology && state.topology.nodes ? state.topology.nodes : [];
   nodes.forEach((n) => {
+    const row = document.createElement("div");
+    row.className = "node-row";
+
     const btn = document.createElement("button");
-    btn.className = "node-item";
+    btn.className = "node-item node-main";
     if (n.name === state.selectedNode) btn.classList.add("active");
-    btn.onclick = async () => {
+    btn.onclick = async (ev) => {
+      // Immediate single-click feedback; ignore the second click in a double-click.
+      if (ev && ev.detail > 1) return;
       state.selectedNode = n.name;
       highlightSelection();
       renderNodes();
@@ -426,12 +508,49 @@ function renderNodes() {
     btn.innerHTML = `
       <div><strong>${n.name}</strong> <span class="tag">${n.kind}</span></div>
     `;
-    btn.ondblclick = () => {
-      if (state.centerMode !== "terminal") return;
+
+    const termBtn = document.createElement("button");
+    termBtn.className = "node-term-btn";
+    termBtn.type = "button";
+    termBtn.title = `Open terminal for ${n.name}`;
+    termBtn.setAttribute("aria-label", `Open terminal for ${n.name}`);
+    termBtn.innerHTML = `
+      <svg class="node-term-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="3.5" y="4.5" width="17" height="12" rx="2"></rect>
+        <path d="M9 19.5h6"></path>
+        <path d="M8 16.5h8"></path>
+      </svg>
+    `;
+    termBtn.onclick = (ev) => {
+      if (ev) ev.stopPropagation();
+      setCenterMode("terminal");
       openTerminalForNode(n.name);
     };
-    list.appendChild(btn);
+
+    row.appendChild(btn);
+    row.appendChild(termBtn);
+    list.appendChild(row);
   });
+}
+
+function diffAddedSet(currLines, prevLines) {
+  const prev = new Set(prevLines || []);
+  const added = new Set();
+  (currLines || []).forEach((l) => {
+    if (!prev.has(l)) added.add(l);
+  });
+  return added;
+}
+
+function renderDiffPre(lines, addedSet) {
+  if (!lines || !lines.length) return "";
+  return lines
+    .map((l) =>
+      addedSet && addedSet.has(l)
+        ? `<span class="diff-line">${escapeHtml(l)}</span>`
+        : escapeHtml(l)
+    )
+    .join("\n");
 }
 
 function renderDetail() {
@@ -443,27 +562,28 @@ function renderDetail() {
     return;
   }
   state.selectedNode = n.name;
+  const prevSnapshot = state.detailPrevByNode[n.name] || {};
+  const diffEnabled = state.live;
+
   const routes = Array.isArray(n.routes) ? n.routes : [];
-  const routesBlock = routes.length
-    ? routes
-        .map((r) => {
-          const isDefault = r.startsWith("default ");
-          const metricMatch = r.match(/\bmetric\s+(\d+)/);
-          const parts = [];
-          if (metricMatch && metricMatch[1]) parts.push(`metric=${metricMatch[1]}`);
-          const suffix = parts.length ? `  [${parts.join(", ")}]` : "";
-          return `${isDefault ? "* " : "  "}${r}${suffix}`;
-        })
-        .join("\n")
-    : "-";
+  const routeLines = routes.length
+    ? routes.map((r) => {
+        const isDefault = r.startsWith("default ");
+        const metricMatch = r.match(/\bmetric\s+(\d+)/);
+        const parts = [];
+        if (metricMatch && metricMatch[1]) parts.push(`metric=${metricMatch[1]}`);
+        const suffix = parts.length ? `  [${parts.join(", ")}]` : "";
+        return `${isDefault ? "* " : "  "}${r}${suffix}`;
+      })
+    : [];
+  const ipRules = Array.isArray(n.ip_rules) ? n.ip_rules : [];
   const ifaces = n.ifaces || [];
+  const ifaceSigCurr = {};
   const ifaceLines = ifaces.length
     ? ifaces
         .map((i) => {
           const stateStr = state.live ? (i.up ? "UP" : "DOWN") : "-";
           const oper = state.live && i.operstate ? ` (${i.operstate})` : "";
-          const mac = i.mac ? ` mac=${i.mac}` : "";
-          const mtu = i.mtu ? ` mtu=${i.mtu}` : "";
           const hasStats = i.rx_packets !== undefined || i.tx_packets !== undefined;
           const rxPackets = i.rx_packets !== undefined ? i.rx_packets : 0;
           const rxBytes = i.rx_bytes !== undefined ? i.rx_bytes : 0;
@@ -473,25 +593,173 @@ function renderDetail() {
           const txBytes = i.tx_bytes !== undefined ? i.tx_bytes : 0;
           const txDropped = i.tx_dropped !== undefined ? i.tx_dropped : 0;
           const txErrors = i.tx_errors !== undefined ? i.tx_errors : 0;
-          const rx = ` rx[pkt=${rxPackets} bytes=${rxBytes} drop=${rxDropped} err=${rxErrors}]`;
-          const tx = ` tx[pkt=${txPackets} bytes=${txBytes} drop=${txDropped} err=${txErrors}]`;
-          const statsFlag = ` stats=${hasStats ? "present" : "missing"}`;
-          return `- ${i.ifname}: ${i.ipv4 || "-"} [${stateStr}]${oper}${mac}${mtu}${rx}${tx}${statsFlag}`;
+          const ipv6 = Array.isArray(i.ipv6) ? i.ipv6 : [];
+
+          const line1 = `${i.ifname}  [${stateStr}]${oper}  ip=${i.ipv4 || "-"}`;
+          const line2 = `ipv6=${ipv6.length ? ipv6.join(", ") : "-"}`;
+          const line3 = `mac=${i.mac || "-"}  mtu=${i.mtu || "-"}`;
+          const line4 = `rx: pkt=${rxPackets} bytes=${rxBytes} drop=${rxDropped} err=${rxErrors}`;
+          const line5 = `tx: pkt=${txPackets} bytes=${txBytes} drop=${txDropped} err=${txErrors}`;
+          const line6 = hasStats ? "" : "stats: missing";
+
+          const sig = [line1, line2, line3, line4, line5, line6].filter(Boolean).join("|");
+          ifaceSigCurr[i.ifname] = sig;
+          const changed =
+            diffEnabled &&
+            prevSnapshot.ifaceSig &&
+            prevSnapshot.ifaceSig[i.ifname] !== undefined &&
+            prevSnapshot.ifaceSig[i.ifname] !== sig;
+
+          const key = `${n.name}:${i.ifname}`;
+          const keyAttr = encodeURIComponent(key);
+          const ifaceOpen = !!state.ifaceDetailOpen[key];
+          const detail = [line2, line3, line4, line5, line6].filter(Boolean).join("\n");
+          return `
+            <div class="iface-item">
+              <div class="iface-main ${changed ? "diff-line-bg" : ""}">
+                <button class="fold-btn fold-btn-iface" type="button" data-fold-iface="${keyAttr}">${ifaceOpen ? "−" : "+"}</button>
+                <span>${escapeHtml(line1)}</span>
+              </div>
+              <pre class="iface-extra ${ifaceOpen ? "" : "hidden"}">${escapeHtml(detail)}</pre>
+            </div>
+          `;
         })
-        .join("\n")
-    : "-";
+        .join("")
+    : "";
   const neigh = Array.isArray(n.neigh) ? n.neigh : [];
-  const neighBlock = neigh.length ? neigh.join("\n") : "-";
+  const fdb = Array.isArray(n.fdb) ? n.fdb : [];
+  const tcSections = ifaces
+    .map((i) => {
+      const raw = String(i.tc || "").trim();
+      if (!raw) return "";
+      const lines = raw
+        .split("\n")
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (!lines.length) return "";
+
+      // Group by qdisc block; drop entire "qdisc noqueue" blocks to reduce noise.
+      const blocks = [];
+      let cur = [];
+      lines.forEach((ln) => {
+        if (ln.startsWith("qdisc ")) {
+          if (cur.length) blocks.push(cur);
+          cur = [ln];
+          return;
+        }
+        if (!cur.length) {
+          cur = [ln];
+          return;
+        }
+        cur.push(ln);
+      });
+      if (cur.length) blocks.push(cur);
+
+      const keptLines = blocks
+        .filter((b) => !(b[0] && b[0].includes("qdisc noqueue")))
+        .flatMap((b) => b);
+      if (!keptLines.length) return "";
+      const body = keptLines.map((ln) => `  ${ln}`).join("\n");
+      return `${i.ifname}:\n${body}`;
+    })
+    .filter(Boolean);
+  const tcLines = tcSections.length ? tcSections.join("\n\n").split("\n") : [];
+
+  const routesOpen = state.detailSectionOpen.routes !== false;
+  const ipRulesOpen = state.detailSectionOpen.iprules !== false;
+  const ifacesOpen = state.detailSectionOpen.ifaces !== false;
+  const neighOpen = state.detailSectionOpen.neigh !== false;
+  const fdbOpen = state.detailSectionOpen.fdb === true;
+  const tcOpen = state.detailSectionOpen.tc === true;
+
+  const routeAdded = diffEnabled ? diffAddedSet(routeLines, prevSnapshot.routes || []) : null;
+  const ipRuleAdded = diffEnabled ? diffAddedSet(ipRules, prevSnapshot.ipRules || []) : null;
+  const neighAdded = diffEnabled ? diffAddedSet(neigh, prevSnapshot.neigh || []) : null;
+  const fdbAdded = diffEnabled ? diffAddedSet(fdb, prevSnapshot.fdb || []) : null;
+  const tcAdded = diffEnabled ? diffAddedSet(tcLines, prevSnapshot.tc || []) : null;
 
   $("detailBody").innerHTML = `
-    <p><strong>Node:</strong> ${n.name}</p>
-    <h4 class="section-title">Routing table</h4>
-    <pre>${escapeHtml(routesBlock)}</pre>
-    <h4 class="section-title">Interfaces (up/down)</h4>
-    <pre>${escapeHtml(ifaceLines)}</pre>
-    <h4 class="section-title">Neighbors (ARP/NDP)</h4>
-    <pre>${escapeHtml(neighBlock)}</pre>
+    <div class="detail-root">
+      <div class="detail-node-header">
+        <span class="detail-node-name">${escapeHtml(n.name)}</span>
+        ${n.kind ? `<span class="detail-node-kind">${escapeHtml(n.kind)}</span>` : ""}
+      </div>
+      <div class="detail-section detail-section--routes">
+        <div class="detail-section-head section-title-row" data-fold-section="routes">
+          <h4 class="section-title">Routing Table</h4>
+          <span class="section-toggle-indicator">${routesOpen ? "▾" : "▸"}</span>
+        </div>
+        <div class="detail-section-body ${routesOpen ? "" : "hidden"}"><pre>${renderDiffPre(routeLines, routeAdded)}</pre></div>
+      </div>
+      <div class="detail-section detail-section--ifaces">
+        <div class="detail-section-head section-title-row" data-fold-section="ifaces">
+          <h4 class="section-title">Interfaces</h4>
+          <span class="section-toggle-indicator">${ifacesOpen ? "▾" : "▸"}</span>
+        </div>
+        <div class="detail-section-body detail-section-body--ifaces ${ifacesOpen ? "" : "hidden"}">${ifaceLines}</div>
+      </div>
+      <div class="detail-section detail-section--neigh">
+        <div class="detail-section-head section-title-row" data-fold-section="neigh">
+          <h4 class="section-title">Neighbors</h4>
+          <span class="section-toggle-indicator">${neighOpen ? "▾" : "▸"}</span>
+        </div>
+        <div class="detail-section-body ${neighOpen ? "" : "hidden"}"><pre>${renderDiffPre(neigh, neighAdded)}</pre></div>
+      </div>
+      <div class="detail-section detail-section--fdb">
+        <div class="detail-section-head section-title-row" data-fold-section="fdb">
+          <h4 class="section-title">FDB</h4>
+          <span class="section-toggle-indicator">${fdbOpen ? "▾" : "▸"}</span>
+        </div>
+        <div class="detail-section-body ${fdbOpen ? "" : "hidden"}"><pre>${renderDiffPre(fdb, fdbAdded)}</pre></div>
+      </div>
+      <div class="detail-section detail-section--tc">
+        <div class="detail-section-head section-title-row" data-fold-section="tc">
+          <h4 class="section-title">TC Qdisc</h4>
+          <span class="section-toggle-indicator">${tcOpen ? "▾" : "▸"}</span>
+        </div>
+        <div class="detail-section-body ${tcOpen ? "" : "hidden"}"><pre>${renderDiffPre(tcLines, tcAdded)}</pre></div>
+      </div>
+      <div class="detail-section detail-section--iprules">
+        <div class="detail-section-head section-title-row" data-fold-section="iprules">
+          <h4 class="section-title">IP Rules</h4>
+          <span class="section-toggle-indicator">${ipRulesOpen ? "▾" : "▸"}</span>
+        </div>
+        <div class="detail-section-body ${ipRulesOpen ? "" : "hidden"}"><pre>${renderDiffPre(ipRules, ipRuleAdded)}</pre></div>
+      </div>
+    </div>
   `;
+  bindDetailFoldEvents();
+  state.detailPrevByNode[n.name] = {
+    routes: routeLines,
+    ipRules: ipRules,
+    neigh: neigh,
+    fdb: fdb,
+    tc: tcLines,
+    ifaceSig: ifaceSigCurr,
+  };
+}
+
+function bindDetailFoldEvents() {
+  const host = $("detailBody");
+  if (!host) return;
+  host.querySelectorAll(".detail-section-head[data-fold-section]").forEach((head) => {
+    head.onclick = () => {
+      const k = head.getAttribute("data-fold-section");
+      if (!k) return;
+      state.detailSectionOpen[k] = !(state.detailSectionOpen[k] !== false);
+      renderDetail();
+    };
+  });
+  host.querySelectorAll("[data-fold-iface]").forEach((btn) => {
+    btn.onclick = (ev) => {
+      if (ev) ev.stopPropagation();
+      const keyAttr = btn.getAttribute("data-fold-iface");
+      if (!keyAttr) return;
+      const key = decodeURIComponent(keyAttr);
+      state.ifaceDetailOpen[key] = !state.ifaceDetailOpen[key];
+      renderDetail();
+    };
+  });
 }
 
 function setCenterMode(mode) {
@@ -644,6 +912,14 @@ async function openTerminalForNode(nodeName) {
     return;
   }
   if (!nodeName) return;
+  state.selectedNode = nodeName;
+  highlightSelection();
+  renderNodes();
+  if (state.live) {
+    await loadTopology(nodeName, { skipGraphRefresh: true, silent: true });
+  } else {
+    renderDetail();
+  }
 
   // Always create a new terminal session (same node can have multiple tabs).
   const sessionId = `${state.lab}:${nodeName}#${++state.terminalSessionSeq}`;
@@ -844,7 +1120,7 @@ async function loadTopology(forceNodeName, options) {
       `Updated: ${d.toLocaleTimeString()} (live=${state.live ? "on" : "off"})`
     );
     $("graphHint").textContent =
-      "Cytoscape (drag to pin, double-click to unpin)";
+      "(drag to pin, double-click to unpin)";
   }
   if (!skipGraphRefresh && state.centerMode === "topo") {
     requestAnimationFrame(() => {
@@ -860,6 +1136,7 @@ function setupEvents() {
     closeAllTerminalSessions();
     state.lab = e.target.value;
     state.selectedNode = "";
+    state.detailPrevByNode = {};
     await loadTopology();
   };
   $("refreshBtn").onclick = () =>
@@ -879,8 +1156,15 @@ function setupEvents() {
     }
   };
   $("liveToggle").onchange = async () => {
+    state.detailPrevByNode = {};
     await loadTopology();
   };
+  const themeBtn = $("themeToggle");
+  if (themeBtn) {
+    themeBtn.onclick = () => {
+      setTheme(state.theme === "dark" ? "light" : "dark");
+    };
+  }
 
   const viewSel = $("viewModeSelect");
   if (viewSel) {
@@ -889,6 +1173,7 @@ function setupEvents() {
 }
 
 async function init() {
+  loadInitialTheme();
   updateMainHeightVar();
   window.addEventListener("resize", () => {
     updateMainHeightVar();
@@ -909,7 +1194,7 @@ async function init() {
   await loadTopology();
   setCenterMode(state.centerMode);
   if ($("autoRefresh").checked) {
-    state.timer = setInterval(loadTopology, 2000);
+    state.timer = setInterval(() => loadTopology(undefined, { silent: true }), 2000);
   }
 }
 

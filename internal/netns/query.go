@@ -5,9 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// ipRuleBuiltIn matches kernel default rules: "from all lookup local|main|default".
+// These appear in almost every netns and hide custom policy routing.
+var ipRuleBuiltIn = regexp.MustCompile(`^\d+:\s+from\s+all\s+lookup\s+(local|main|default)\s*$`)
 
 // MgmtIfaceName is the management interface inside each node netns.
 const MgmtIfaceName = "eth0"
@@ -54,6 +59,28 @@ func QueryIfaceIPv4(labName, nodeName, dev string) string {
 		}
 	}
 	return ""
+}
+
+// QueryIfaceIPv6 returns all IPv6 addresses on dev in CIDR form.
+func QueryIfaceIPv6(labName, nodeName, dev string) []string {
+	ns := NamespaceName(labName, nodeName)
+	cmd := exec.Command("ip", "netns", "exec", ns, "ip", "-j", "addr", "show", "dev", dev)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+
+	var list []ipAddrIface
+	if err := json.Unmarshal(out, &list); err != nil || len(list) == 0 {
+		return nil
+	}
+	var outV6 []string
+	for _, ai := range list[0].AddrInfo {
+		if ai.Family == "inet6" && ai.Local != "" {
+			outV6 = append(outV6, fmt.Sprintf("%s/%d", ai.Local, ai.Prefixlen))
+		}
+	}
+	return outV6
 }
 
 // QueryIfaceUp returns whether dev is up in the node netns, plus best-effort operstate.
@@ -103,6 +130,31 @@ func QueryRoutes(labName, nodeName string) []string {
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// QueryIPRules returns ip rule lines (best-effort).
+func QueryIPRules(labName, nodeName string) []string {
+	ns := NamespaceName(labName, nodeName)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", ns, "ip", "rule", "show")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if ipRuleBuiltIn.MatchString(line) {
 			continue
 		}
 		lines = append(lines, line)
@@ -210,6 +262,35 @@ func QueryIfaceMeta(labName, nodeName, dev string) IfaceMeta {
 	return IfaceMeta{}
 }
 
+// QueryIfaceNames returns interface names in node netns (best-effort).
+// Loopback is excluded because it is usually not helpful in topology details.
+func QueryIfaceNames(labName, nodeName string) []string {
+	ns := NamespaceName(labName, nodeName)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", ns, "ip", "-j", "link", "show")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var list []struct {
+		IfName string `json:"ifname"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(list))
+	for _, it := range list {
+		name := strings.TrimSpace(it.IfName)
+		if name == "" || name == "lo" {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
 // QueryNeighbors returns "ip neigh show" lines (best-effort).
 func QueryNeighbors(labName, nodeName string) []string {
 	ns := NamespaceName(labName, nodeName)
@@ -225,6 +306,32 @@ func QueryNeighbors(labName, nodeName string) []string {
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// QueryFDB returns "bridge fdb show" lines in node netns (best-effort).
+func QueryFDB(labName, nodeName string) []string {
+	ns := NamespaceName(labName, nodeName)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", ns, "bridge", "fdb", "show")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Filter noisy local/static records; UI focuses on learned/forwarding-relevant entries.
+		if strings.Contains(line, " self ") && strings.Contains(line, " permanent") {
 			continue
 		}
 		lines = append(lines, line)

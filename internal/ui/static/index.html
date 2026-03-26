@@ -7,34 +7,14 @@
     <link rel="stylesheet" href="/ui/styles.css" />
     <link rel="stylesheet" href="/ui/ui-vendor/xterm.css" />
   </head>
-  <body>
+  <body data-theme="light">
     <header class="topbar">
-      <div class="brand">netnslab UI</div>
+      <div class="brand">NETNSLAB</div>
 
       <div class="controls">
         <label class="control">
           Lab:
           <select id="labSelect"></select>
-        </label>
-        <button id="refreshBtn" class="btn">Refresh</button>
-        <label class="control">
-          Layout:
-          <select id="layoutSelect">
-            <option value="cose">cose</option>
-            <option value="circle">circle</option>
-            <option value="grid">grid</option>
-            <option value="concentric">concentric</option>
-            <option value="breadthfirst">breadthfirst</option>
-          </select>
-        </label>
-        <button id="relayoutBtn" class="btn">Relayout</button>
-        <label class="control">
-          <input id="autoRefresh" type="checkbox" checked />
-          Auto refresh
-        </label>
-        <label class="control">
-          <input id="liveToggle" type="checkbox" checked />
-          Live Details
         </label>
         <label class="control">
           View:
@@ -43,9 +23,26 @@
             <option value="terminal">Terminal</option>
           </select>
         </label>
+        <button id="refreshBtn" class="btn">Refresh</button>
+        <label class="control">
+          <input id="autoRefresh" type="checkbox" checked />
+          Auto refresh
+        </label>
+        <label class="control">
+          <input id="liveToggle" type="checkbox" checked />
+          Live Details
+        </label>
       </div>
 
       <div class="meta">
+        <button
+          id="themeToggle"
+          class="btn btn-theme"
+          title="Switch to dark theme"
+          aria-label="Switch to dark theme"
+        >
+          <span id="themeIcon" aria-hidden="true">☾</span>
+        </button>
         <span id="status">--</span>
       </div>
     </header>
@@ -61,8 +58,23 @@
       <section class="panel center-pane">
         <div id="topoView" class="center-view">
           <div class="graph-title">
-            Topology
-            <span id="graphHint" class="hint">(Cytoscape layout)</span>
+            <div class="graph-title-main">
+              Topology
+              <span id="graphHint" class="hint">(Cytoscape layout)</span>
+            </div>
+            <div class="graph-controls">
+              <label class="control">
+                Layout:
+                <select id="layoutSelect">
+                  <option value="cose">cose</option>
+                  <option value="circle">circle</option>
+                  <option value="grid">grid</option>
+                  <option value="concentric">concentric</option>
+                  <option value="breadthfirst">breadthfirst</option>
+                </select>
+              </label>
+              <button id="relayoutBtn" class="btn">Relayout</button>
+            </div>
           </div>
           <div id="topologyGraph" class="topology"></div>
         </div>
@@ -73,7 +85,7 @@
           </div>
           <div class="terminal-tabs-body" id="terminalTabsBody"></div>
           <div id="terminalEmpty" class="terminal-empty">
-            Select nodes by double-click when <span class="kbd">Terminal</span> view is active.
+            Click the terminal icon in <span class="kbd">Nodes</span> to open a terminal tab.
           </div>
         </div>
       </section>
