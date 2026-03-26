@@ -91,9 +91,7 @@ func terminalWSHandler(labFilter string) http.HandlerFunc {
 		defer closeCmd()
 
 		// PTY -> websocket
-		readDone := make(chan struct{})
 		go func() {
-			defer close(readDone)
 			buf := make([]byte, 4096)
 			for {
 				n, err := ptyFile.Read(buf)
@@ -127,7 +125,89 @@ func terminalWSHandler(labFilter string) http.HandlerFunc {
 				}
 			}
 		}
+	}
+}
 
-		<-readDone
+func hostTerminalWSHandler() http.HandlerFunc {
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws/host/terminal" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+
+		env := append(os.Environ(),
+			"TERM=xterm-256color",
+			"PS1=netnslab-host:$ ",
+		)
+
+		cmd := exec.Command("bash", "-l")
+		cmd.Env = env
+		cmd.Stderr = nil
+		cmd.Stdout = nil
+		cmd.Stdin = nil
+
+		ptyFile, err := pty.Start(cmd)
+		if err != nil {
+			_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("pty start failed: %v", err)))
+			return
+		}
+		defer func() { _ = ptyFile.Close() }()
+
+		_ = pty.Setsize(ptyFile, &pty.Winsize{Cols: 120, Rows: 40})
+
+		var once sync.Once
+		closeCmd := func() {
+			once.Do(func() {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+			})
+		}
+		defer closeCmd()
+
+		// PTY -> websocket
+		go func() {
+			buf := make([]byte, 4096)
+			for {
+				n, err := ptyFile.Read(buf)
+				if n > 0 {
+					if werr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); werr != nil {
+						return
+					}
+				}
+				if err != nil {
+					return
+				}
+			}
+		}()
+
+		// websocket -> PTY
+		for {
+			mt, msg, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+			switch mt {
+			case websocket.BinaryMessage:
+				_, _ = ptyFile.Write(msg)
+			case websocket.TextMessage:
+				var rm terminalResizeMsg
+				if err := json.Unmarshal(msg, &rm); err != nil {
+					continue
+				}
+				if rm.Type == "resize" && rm.Cols > 0 && rm.Rows > 0 {
+					_ = pty.Setsize(ptyFile, &pty.Winsize{Cols: uint16(rm.Cols), Rows: uint16(rm.Rows)})
+				}
+			}
+		}
 	}
 }

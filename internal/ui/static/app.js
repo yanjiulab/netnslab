@@ -1220,6 +1220,147 @@ async function openTerminalForNode(nodeName) {
   );
 }
 
+function openHostTerminal() {
+  // Always create a new host terminal session.
+  const sessionId = `host#${++state.terminalSessionSeq}`;
+
+  const hostArea = terminalTabsBodyEl();
+  const tabsArea = terminalTabsEl();
+  if (!hostArea || !tabsArea) {
+    setStatus("Terminal UI not ready");
+    return;
+  }
+
+  const tabEl = document.createElement("div");
+  tabEl.className = "terminal-tab";
+  tabEl.id = terminalTabId(sessionId);
+  tabEl.dataset.node = "host";
+
+  const titleEl = document.createElement("div");
+  titleEl.className = "terminal-tab-title";
+  titleEl.textContent = "host@local";
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "terminal-tab-close";
+  closeBtn.type = "button";
+  closeBtn.textContent = "×";
+  closeBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    closeTerminalForSession(sessionId);
+  };
+
+  tabEl.appendChild(titleEl);
+  tabEl.appendChild(closeBtn);
+  tabEl.onclick = () => {
+    setCenterMode("terminal");
+    selectTerminalTab(sessionId);
+  };
+
+  const hostEl = document.createElement("div");
+  hostEl.className = "terminal-tab-host hidden";
+  hostEl.id = terminalHostId(sessionId);
+
+  tabsArea.appendChild(tabEl);
+  hostArea.appendChild(hostEl);
+
+  const term = new Terminal({
+    cursorBlink: true,
+    convertEol: true,
+    scrollback: 2000,
+    fontSize: state.terminalFontSize || 13,
+    theme: getTerminalTheme(state.theme, state.terminalThemePreset),
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(hostEl);
+
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws/host/terminal`);
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  const tab = {
+    ws: ws,
+    term: term,
+    fit: fit,
+    hostEl: hostEl,
+    tabEl: tabEl,
+    ro: null,
+    closing: false,
+    nodeName: "host",
+  };
+  state.terminalTabs[sessionId] = tab;
+  state.terminalTabOrder.push(sessionId);
+
+  ensureTerminalEmptyState();
+  selectTerminalTab(sessionId);
+
+  ws.onopen = () => {
+    try {
+      fit.fit();
+      terminalSendResizeForSession(sessionId);
+    } catch (_) {}
+    term.focus();
+  };
+
+  ws.onmessage = async (ev) => {
+    if (!state.terminalTabs[sessionId] || state.terminalTabs[sessionId].closing) return;
+    const data = ev.data;
+    if (typeof data === "string") {
+      term.write(data);
+      return;
+    }
+    if (data instanceof ArrayBuffer) {
+      term.write(decoder.decode(new Uint8Array(data)));
+      return;
+    }
+    if (data instanceof Blob) {
+      const buf = await data.arrayBuffer();
+      term.write(decoder.decode(new Uint8Array(buf)));
+      return;
+    }
+  };
+
+  ws.onerror = () => {
+    setStatus("Host terminal WebSocket error");
+  };
+
+  ws.onclose = () => {
+    if (!state.terminalTabs[sessionId]) return;
+    if (tab.closing) return;
+    setStatus("Host terminal closed");
+    closeTerminalForSession(sessionId);
+  };
+
+  term.onData((d) => {
+    const t = state.terminalTabs[sessionId];
+    if (!t || !t.ws || t.ws.readyState !== WebSocket.OPEN) return;
+    const bytes = encoder.encode(d);
+    t.ws.send(bytes);
+  });
+
+  tab.ro = new ResizeObserver(() => {
+    const t = state.terminalTabs[sessionId];
+    if (!t) return;
+    if (t.hostEl.classList.contains("hidden")) return;
+    try {
+      fit.fit();
+      terminalSendResizeForSession(sessionId);
+    } catch (_) {}
+  });
+  tab.ro.observe(hostEl);
+
+  hostEl.addEventListener(
+    "wheel",
+    (ev) => {
+      if (!ev.ctrlKey && !ev.metaKey) return;
+      ev.preventDefault();
+      zoomTerminalFont(ev.deltaY);
+    },
+    { passive: false }
+  );
+}
+
 async function loadLabs() {
   const data = await apiGet("/api/labs");
   state.labs = data.labs || [];
@@ -1457,6 +1598,13 @@ function setupEvents() {
         localStorage.setItem("netnslab.terminalThemePreset", v);
       } catch (_) {}
       applyTerminalTheme();
+    };
+  }
+  const hostTerminalBtn = $("openHostTerminalBtn");
+  if (hostTerminalBtn) {
+    hostTerminalBtn.onclick = () => {
+      setCenterMode("terminal");
+      openHostTerminal();
     };
   }
 }

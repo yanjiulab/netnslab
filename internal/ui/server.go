@@ -153,6 +153,8 @@ func Serve(addr, labFilter string) error {
 
 	// Interactive node terminal (websocket + PTY).
 	mux.HandleFunc("/ws/labs/", terminalWSHandler(labFilter))
+	// Interactive host terminal (websocket + PTY).
+	mux.HandleFunc("/ws/host/terminal", hostTerminalWSHandler())
 
 	logx.S().Infof("ui listening on %s", addr)
 	return http.ListenAndServe(addr, mux)

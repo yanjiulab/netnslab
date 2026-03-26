@@ -392,6 +392,11 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.btn-host-terminal {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .terminal-theme-control {
   font-size: 12px;
 }
